@@ -1,53 +1,41 @@
 'use client';
 
 import React from 'react';
-import { MessageSquare, Send, Phone, MessageCircle } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import WhatsAppConnector from '@/components/WhatsAppConnector';
 
 export default function WhatsAppPage() {
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-      <div className="max-w-md w-full bg-white rounded-3xl shadow-xl overflow-hidden border border-slate-100 flex flex-col">
-        {/* Profile Header */}
-        <div className="bg-[#075e54] p-6 text-white flex items-center gap-4">
-          <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
-            <MessageSquare className="w-6 h-6" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold">Imperia WhatsApp</h1>
-            <p className="text-xs text-white/70 flex items-center gap-1">
-              <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-              Sistema de Mensajería Activo
-            </p>
-          </div>
-        </div>
-
-        {/* Chat Area Skeleton */}
-        <div className="flex-1 p-6 space-y-4 min-h-[300px] overflow-y-auto bg-[#e5ddd5] relative">
-          <div className="bg-white p-3 rounded-2xl rounded-tl-none shadow-sm max-w-[80%] self-start text-sm text-slate-700">
-            Bienvenido al portal de WhatsApp Imperia. Seleccione una acción.
-          </div>
-          
-          <div className="bg-[#dcf8c6] p-3 rounded-2xl rounded-tr-none shadow-sm max-w-[80%] ml-auto text-sm text-slate-700">
-            En espera de comandos de automatización...
-          </div>
-        </div>
-
-        {/* Action Bar */}
-        <div className="p-4 bg-slate-50 border-t flex flex-col gap-3">
-          <div className="flex gap-2">
-            <Button className="flex-1 bg-[#25d366] hover:bg-[#128c7e] text-white gap-2 h-12 rounded-xl">
-              <MessageCircle className="w-5 h-5" /> Enviar Mensaje
-            </Button>
-            <Button variant="outline" className="h-12 w-12 rounded-xl">
-              <Phone className="w-5 h-5 text-slate-600" />
-            </Button>
-          </div>
-          <p className="text-[10px] text-center text-slate-400 uppercase font-semibold tracking-wider">
-            ArquitectoManchego Ecosystem
-          </p>
-        </div>
+    <div className="min-h-screen bg-[#0a0a0a] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-black to-black flex flex-col items-center justify-center p-6 sm:p-12 font-[family-name:var(--font-geist-sans)]">
+      {/* Background Decorative Elements */}
+      <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none opacity-20">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-emerald-500/20 rounded-full blur-[120px]" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/20 rounded-full blur-[120px]" />
       </div>
+
+      <header className="relative z-10 mb-12 text-center">
+        <h1 className="text-5xl sm:text-7xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-b from-white to-white/40 mb-4">
+          IMPERIA WA
+        </h1>
+        <p className="text-slate-400 text-lg sm:text-xl font-medium tracking-wide">
+          Motor de Automatización y CRM Exclusivo
+        </p>
+      </header>
+      
+      <main className="relative z-10 w-full animate-in fade-in slide-in-from-bottom-8 duration-1000">
+        <WhatsAppConnector />
+      </main>
+
+      <footer className="relative z-10 mt-16 flex flex-col items-center gap-2">
+        <div className="h-px w-12 bg-slate-800 mb-4" />
+        <p className="text-[10px] text-slate-500 uppercase font-black tracking-[0.2em]">
+          ArquitectoManchego Ecosystem
+        </p>
+        <div className="flex gap-4 mt-2">
+          <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+          <div className="w-1 h-1 rounded-full bg-blue-500 animate-pulse delay-75" />
+          <div className="w-1 h-1 rounded-full bg-indigo-500 animate-pulse delay-150" />
+        </div>
+      </footer>
     </div>
   );
 }
