@@ -1,3 +1,4 @@
+import { NextResponse } from 'next/server';
 import { getClients } from '@/lib/firebase-server';
 import { firebaseConfig } from '@/firebase/config';
 import fs from 'fs';
