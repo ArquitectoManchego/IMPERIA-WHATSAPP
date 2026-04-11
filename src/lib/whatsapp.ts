@@ -30,7 +30,8 @@ export const initializeWhatsApp = async (forceRestart = false) => {
 
   client = new Client({
     authStrategy: new LocalAuth({
-      clientId: 'imperia-wa-crm'
+      clientId: 'imperia-wa-crm',
+      dataPath: process.env.VERCEL ? '/tmp/.wwebjs_auth' : './.wwebjs_auth'
     }),
     puppeteer: {
       headless: true,
