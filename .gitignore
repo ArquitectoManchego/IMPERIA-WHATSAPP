@@ -40,3 +40,9 @@ next-env.d.ts
 debug_results.json
 server.log
 debug-db.mjs
+.env.local
+.env
+.env.*.local
+*.key
+secrets.json
+credential*.json
