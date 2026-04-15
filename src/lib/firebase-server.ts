@@ -71,16 +71,34 @@ export const isRegisteredClient = async (phoneNumber: string) => {
 
 export const saveClientFromGoogle = async (clientData: any) => {
   try {
+    const cleanPhone = clientData.telefono.replace(/\D/g, '');
+    if (!cleanPhone) throw new Error('Phone number is required');
+
+    // Check if exists
+    const existing = await isRegisteredClient(cleanPhone);
     const clientsRef = collection(db, CLIENTS_PATH);
+
+    if (existing && existing.id) {
+      const docRef = doc(db, CLIENTS_PATH, existing.id);
+      await setDoc(docRef, {
+        ...existing,
+        nombre: clientData.nombre || existing.nombre,
+        email: clientData.email || existing.email || '',
+        status: existing.status === 'Importado Google' ? 'Importado Google' : existing.status,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      return existing.id;
+    }
+
     const newDocRef = doc(clientsRef);
     const id = newDocRef.id;
 
     const dataToSave = {
       nombre: clientData.nombre,
-      telefono: clientData.telefono.replace(/\D/g, ''),
+      telefono: cleanPhone,
       email: clientData.email || '',
       id,
-      genero: 'indefinido', // Default for imported
+      genero: 'indefinido',
       status: 'Importado Google',
       updatedAt: serverTimestamp(),
       createdAt: serverTimestamp(),

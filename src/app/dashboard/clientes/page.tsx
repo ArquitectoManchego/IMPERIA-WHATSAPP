@@ -32,7 +32,7 @@ export default function ClientesPage() {
   
   const [taylorClients, setTaylorClients] = useState<any[]>([]);
   const [googleContacts, setGoogleContacts] = useState<any[]>([]);
-  const [view, setView] = useState<'taylor' | 'google'>('taylor');
+  const [view, setView] = useState<'taylor' | 'google' | 'all'>('all');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -74,6 +74,30 @@ export default function ClientesPage() {
     }
   };
 
+  const importClient = async (contact: any) => {
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/sync/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'import',
+          contacts: [contact]
+        })
+      });
+
+      const result = await res.json();
+      if (result.success) {
+        toast({ title: "Cliente Importado", description: `${contact.nombre} se guardó en Firebase.` });
+        fetchTaylorData();
+      }
+    } catch (err) {
+      toast({ title: "Error", description: "No se pudo importar el cliente.", variant: "destructive" });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const handleSync = async () => {
     if (selectedIds.size === 0) return;
     setSyncing(true);
@@ -87,8 +111,8 @@ export default function ClientesPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: view === 'google' ? 'import' : 'push',
-          contacts: view === 'google' ? selectedList : [],
+          action: (view === 'google' || view === 'all') ? 'import' : 'push',
+          contacts: (view === 'google' || view === 'all') ? googleContacts.filter(c => selectedIds.has(c.id) && c.source === 'google') : [],
           clients: view === 'taylor' ? selectedList : []
         })
       });
@@ -113,7 +137,18 @@ export default function ClientesPage() {
     setSelectedIds(newSelected);
   };
 
-  const activeList = view === 'taylor' ? taylorClients : googleContacts;
+  const activeList = React.useMemo(() => {
+    const taylor = taylorClients.map(c => ({ ...c, source: 'taylor' }));
+    const google = googleContacts.map(c => ({ ...c, source: 'google' }));
+
+    if (view === 'taylor') return taylor;
+    if (view === 'google') return google;
+    
+    // Combined view: prioritize taylor if duplicate phone? (Optional improvement)
+    // For now, just concatenate.
+    return [...taylor, ...google];
+  }, [view, taylorClients, googleContacts]);
+
   const filteredList = activeList.filter(c => 
     (c.nombre || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (c.telefono || '').includes(searchTerm) ||
@@ -166,6 +201,27 @@ export default function ClientesPage() {
       {/* Tabs / Switcher */}
       <div className="flex gap-4">
         <button 
+          onClick={() => { setView('all'); setSelectedIds(new Set()); }}
+          className={cn(
+            "flex-1 md:flex-none px-8 py-4 rounded-3xl border transition-all flex items-center gap-3",
+            view === 'all' ? "bg-white/10 border-white/30 text-white" : "bg-white/5 border-transparent text-slate-500 hover:bg-white/10"
+          )}
+        >
+          <div className="flex -space-x-2">
+            <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center border-2 border-[#09090b] z-10">
+               <Database className="w-3 h-3 text-white" />
+            </div>
+            <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center border-2 border-[#09090b]">
+               <Globe className="w-3 h-3 text-white" />
+            </div>
+          </div>
+          <div className="text-left">
+            <p className="text-[10px] font-black uppercase tracking-widest leading-none mb-1">Vista Maestra</p>
+            <p className="text-xs font-bold">Todos los Clientes</p>
+          </div>
+        </button>
+
+        <button 
           onClick={() => { setView('taylor'); setSelectedIds(new Set()); }}
           className={cn(
             "flex-1 md:flex-none px-8 py-4 rounded-3xl border transition-all flex items-center gap-3",
@@ -214,8 +270,25 @@ export default function ClientesPage() {
               className="h-12 bg-white text-black hover:bg-emerald-500 hover:text-white transition-all rounded-2xl px-8 gap-2 font-bold uppercase tracking-widest text-[10px]"
             >
               {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightLeft className="w-4 h-4" />}
-              {view === 'google' ? `Importar ${selectedIds.size} a Taylor` : `Subir ${selectedIds.size} a Google`}
+              {view === 'google' || view === 'all' ? `Importar ${selectedIds.size} a Taylor` : `Subir ${selectedIds.size} a Google`}
             </Button>
+          )}
+
+          {view === 'all' && googleContacts.length > 0 && (
+             <Button 
+               variant="outline"
+               onClick={() => {
+                 const allToImport = googleContacts.filter(gc => !taylorClients.some(tc => tc.telefono === gc.telefono));
+                 if (allToImport.length > 0) {
+                    setSelectedIds(new Set(allToImport.map(c => c.id)));
+                    toast({ title: "Importación Masiva", description: `Se han seleccionado ${allToImport.length} contactos nuevos para importar.` });
+                 }
+               }}
+               className="h-12 bg-white/5 text-slate-400 hover:bg-emerald-500 hover:text-white border-white/10 rounded-2xl px-6 gap-2 font-black tracking-widest uppercase text-[10px]"
+             >
+               <Database className="w-4 h-4" />
+               Cargar todo a Firebase
+             </Button>
           )}
         </div>
 
@@ -235,7 +308,7 @@ export default function ClientesPage() {
                 <tr>
                   <td colSpan={5} className="py-20 text-center">
                     <Loader2 className="w-8 h-8 text-emerald-500 animate-spin mx-auto mb-4" />
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Sincronizando con {view === 'taylor' ? 'Taylor' : 'Google'}...</p>
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Sincronizando con {view === 'all' ? 'Fuentes Master' : view === 'taylor' ? 'Taylor' : 'Google'}...</p>
                   </td>
                 </tr>
               ) : filteredList.map((contact) => (
@@ -243,9 +316,11 @@ export default function ClientesPage() {
                   <td className="px-8 py-6 text-center">
                     <button 
                       onClick={() => toggleSelect(contact.id)}
+                      disabled={contact.source === 'taylor' && view === 'all'}
                       className={cn(
                         "w-6 h-6 rounded-lg border transition-all flex items-center justify-center",
-                        selectedIds.has(contact.id) ? "bg-emerald-500 border-emerald-500 text-white" : "border-white/10 text-slate-800"
+                        selectedIds.has(contact.id) ? "bg-emerald-500 border-emerald-500 text-white" : "border-white/10 text-slate-800",
+                        contact.source === 'taylor' && view === 'all' && "opacity-20 cursor-not-allowed"
                       )}
                     >
                       {selectedIds.has(contact.id) && <CheckSquare className="w-4 h-4" />}
@@ -272,14 +347,25 @@ export default function ClientesPage() {
                   <td className="px-8 py-6">
                     <div className={cn(
                       "inline-flex items-center gap-2 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest",
-                      view === 'taylor' ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"
+                      contact.source === 'taylor' ? "bg-emerald-500/10 text-emerald-500" : "bg-blue-500/10 text-blue-500"
                     )}>
-                      {view === 'taylor' ? <Database className="w-3 h-3" /> : <Globe className="w-3 h-3" />}
-                      {view === 'taylor' ? 'Taylor' : 'Google'}
+                      {contact.source === 'taylor' ? <Database className="w-3 h-3" /> : <Globe className="w-3 h-3" />}
+                      {contact.source === 'taylor' ? 'Taylor' : 'Google'}
                     </div>
                   </td>
                   <td className="px-8 py-6">
-                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Sincronizado</span>
+                    {contact.source === 'google' ? (
+                       <Button 
+                         size="sm"
+                         onClick={() => importClient(contact)}
+                         className="h-8 bg-emerald-500 hover:bg-emerald-600 text-[9px] font-black uppercase tracking-widest px-4 rounded-xl gap-2"
+                       >
+                         <Plus className="w-3 h-3" />
+                         Firebase
+                       </Button>
+                    ) : (
+                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Registrado</span>
+                    )}
                   </td>
                 </tr>
               ))}
