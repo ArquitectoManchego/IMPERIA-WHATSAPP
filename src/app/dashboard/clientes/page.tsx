@@ -25,6 +25,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useToast } from "@/components/ui/use-toast";
+import { db } from "@/lib/firebase";
+import { collection, getDocs, query, orderBy } from "firebase/firestore";
 
 export default function ClientesPage() {
   const { data: session, status } = useSession();
@@ -51,11 +53,38 @@ export default function ClientesPage() {
   const fetchTaylorData = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/clients');
-      const data = await res.json();
+      const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+      const clientsPath = `artifacts/${projectId}/public/data/clients`;
+      
+      console.log('[ClientesPage] Fetching from Firestore:', clientsPath);
+      
+      const q = query(collection(db, clientsPath));
+      const snapshot = await getDocs(q);
+      
+      const data = snapshot.docs.map(doc => {
+        const d = doc.data();
+        const noteNumbers = new Set<string>();
+        if (d.nota_id) noteNumbers.add(d.nota_id);
+        if (Array.isArray(d.abonos)) {
+          d.abonos.forEach((a: any) => {
+            if (a.numero_nota) noteNumbers.add(a.numero_nota);
+          });
+        }
+        return {
+          id: doc.id,
+          ...d,
+          compiledNotes: Array.from(noteNumbers).join(', ')
+        };
+      });
+      
       setTaylorClients(data);
     } catch (err) {
       console.error('Error fetching Taylor clients:', err);
+      toast({ 
+        title: "Error de Conexión", 
+        description: "No se pudieron cargar los clientes de Firebase. Verifica tu conexión.",
+        variant: "destructive" 
+      });
     } finally {
       if (!session) setLoading(false);
     }

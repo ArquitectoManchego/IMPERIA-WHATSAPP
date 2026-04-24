@@ -6,14 +6,24 @@ import { firebaseConfig } from '@/firebase/config';
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 
-const PROJECT_ID = firebaseConfig.projectId;
-const CLIENTS_PATH = `artifacts/${PROJECT_ID}/public/data/clients`;
+const getClientsPath = () => {
+  const projectId = firebaseConfig.projectId;
+  return `artifacts/${projectId}/public/data/clients`;
+};
 
 export const getClients = async () => {
+  const clientsPath = getClientsPath();
+  
   console.log('[FirebaseServer] Project ID:', firebaseConfig.projectId);
-  console.log('[FirebaseServer] Fetching from path:', CLIENTS_PATH);
+  console.log('[FirebaseServer] Fetching from path:', clientsPath);
+  
+  if (!firebaseConfig.projectId) {
+    console.error('[FirebaseServer] Error: projectId is undefined');
+    return [];
+  }
+
   try {
-    const clientsRef = collection(db, CLIENTS_PATH);
+    const clientsRef = collection(db, clientsPath);
     const querySnapshot = await getDocs(clientsRef);
     console.log('[FirebaseServer] Documents found:', querySnapshot.size);
     
@@ -43,7 +53,8 @@ export const getClients = async () => {
 export const isRegisteredClient = async (phoneNumber: string) => {
   try {
     const cleanNumber = phoneNumber.replace(/\D/g, '');
-    const clientsRef = collection(db, CLIENTS_PATH);
+    const clientsPath = getClientsPath();
+    const clientsRef = collection(db, clientsPath);
     
     const q = query(clientsRef, where('telefono', '==', cleanNumber));
     const querySnapshot = await getDocs(q);
@@ -76,10 +87,11 @@ export const saveClientFromGoogle = async (clientData: any) => {
 
     // Check if exists
     const existing = await isRegisteredClient(cleanPhone);
-    const clientsRef = collection(db, CLIENTS_PATH);
+    const clientsPath = getClientsPath();
+    const clientsRef = collection(db, clientsPath);
 
     if (existing && existing.id) {
-      const docRef = doc(db, CLIENTS_PATH, existing.id);
+      const docRef = doc(db, clientsPath, existing.id);
       await setDoc(docRef, {
         ...existing,
         nombre: clientData.nombre || existing.nombre,

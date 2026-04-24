@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
+import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { fetchGoogleContacts, createGoogleContact } from '@/lib/google-contacts';
 import { getClients, saveClientFromGoogle } from '@/lib/firebase-server';
 
 export async function GET() {
-  const session: any = await getServerSession();
+  const session: any = await getServerSession(authOptions);
   console.log('[SyncAPI] GET Request. Session authenticated:', !!session);
   if (session) {
     console.log('[SyncAPI] Scopes returned:', session.scope);
@@ -38,7 +39,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const session: any = await getServerSession();
+  const session: any = await getServerSession(authOptions);
   const { action, contacts, clients } = await request.json();
 
   if (!session || !session.accessToken) {
