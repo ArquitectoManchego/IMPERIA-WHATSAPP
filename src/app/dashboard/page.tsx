@@ -453,7 +453,7 @@ export default function DashboardPage() {
                   ) : filteredMessages.length === 0 ? (
                     <div className="text-center py-20 opacity-30 flex flex-col items-center gap-4">
                       <MessageSquare className="w-12 h-12 text-slate-500" />
-                      <p className="text-xs font-bold uppercase tracking-widest">Sin mensajes en los últimos {daysToLoad} días</p>
+                      <p className="text-xs font-bold uppercase tracking-widest">Sin mensajes en los últimos {daysToLoad} {daysToLoad === 1 ? 'día' : 'días'}</p>
                       <div className="flex flex-col gap-2">
                         <Button 
                           variant="link" 

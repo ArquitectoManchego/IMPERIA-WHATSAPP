@@ -257,6 +257,9 @@ export const getChatMessages = async (chatId: string, days = 2, limit = 100) => 
 
   console.log(`[WhatsApp] Fetching messages for: ${finalId} (days=${days}, limit=${limit})`);
   
+  const cutoff = days === 0 ? 0 : Math.floor(Date.now() / 1000) - (days * 24 * 60 * 60);
+  if (days > 0) console.log(`[WhatsApp] Cutoff timestamp: ${cutoff} (${new Date(cutoff * 1000).toLocaleString()})`);
+
   try {
     const chat = await client.getChatById(finalId);
     let messages = await chat.fetchMessages({ limit });
@@ -265,16 +268,69 @@ export const getChatMessages = async (chatId: string, days = 2, limit = 100) => 
     // Plan B: If Plan A returns nothing, use searchMessages to force a server-side fetch
     if (messages.length === 0) {
       console.log(`[WhatsApp] Plan B - Triggering searchMessages for ${finalId}`);
-      const searched = await client.searchMessages('', { chatId: finalId, limit });
+      const searched = await client.searchMessages('', { chatId: finalId, limit: Math.max(limit, 500) });
       if (searched.length > 0) {
         console.log(`[WhatsApp] Plan B - Recovered ${searched.length} messages`);
         messages = searched;
       }
     }
+
+    // Plan C: Mexican Number Fix - Try without the '1' prefix (521 -> 52)
+    if (messages.length === 0 && finalId.startsWith('521')) {
+      const altId = finalId.replace('521', '52');
+      console.log(`[WhatsApp] Plan C - Trying alternative Mexican ID: ${altId}`);
+      try {
+        const altChat = await client.getChatById(altId);
+        const altMessages = await altChat.fetchMessages({ limit: Math.max(limit, 500) });
+        if (altMessages.length > 0) {
+          console.log(`[WhatsApp] Plan C - Found ${altMessages.length} messages in alternative ID`);
+          messages = altMessages;
+        }
+      } catch (e) {
+        console.log(`[WhatsApp] Plan C - Alternative ID ${altId} not found`);
+      }
+    }
+
+    // Plan D: Raw Store Injection (The most aggressive fallback)
+    if (messages.length === 0 && (client as any).pupPage) {
+      console.log(`[WhatsApp] Plan D - Executing RAW Store Injection for ${finalId}`);
+      try {
+        const rawResults = await (client as any).pupPage.evaluate((id: string, fetchLimit: number) => {
+          // @ts-ignore
+          if (!window.Store || !window.Store.Msg) return null;
+          // @ts-ignore
+          const allMsgs = window.Store.Msg.models;
+          return allMsgs
+            .filter((m: any) => m.id.remote === id || (m.id.remote && m.id.remote._serialized === id))
+            .slice(-fetchLimit)
+            .map((m: any) => ({
+              id: m.id.id,
+              body: m.body,
+              from: m.from ? (m.from._serialized || m.from) : null,
+              to: m.to ? (m.to._serialized || m.to) : null,
+              fromMe: m.id.fromMe,
+              timestamp: m.t || m.timestamp,
+              type: m.type,
+              hasMedia: m.hasMedia || !!m.mediaData
+            }));
+        }, finalId, Math.max(limit, 500));
+
+        if (rawResults && rawResults.length > 0) {
+          console.log(`[WhatsApp] Plan D - Successfully extracted ${rawResults.length} messages directly from Store`);
+          // Map back to format or use directly
+          return rawResults
+            .filter((m: any) => days === 0 || m.timestamp >= cutoff)
+            .sort((a: any, b: any) => a.timestamp - b.timestamp);
+        }
+      } catch (e: any) {
+        console.error(`[WhatsApp] Plan D Failed:`, e.message);
+      }
+    }
     
-    const cutoff = days === 0 ? 0 : Math.floor(Date.now() / 1000) - (days * 24 * 60 * 60);
-    if (days > 0) console.log(`[WhatsApp] Cutoff timestamp: ${cutoff} (${new Date(cutoff * 1000).toLocaleString()})`);
-    
+    if (messages.length > 0 && days > 0) {
+      console.log(`[WhatsApp] First message timestamp: ${messages[0].timestamp} (${new Date(messages[0].timestamp * 1000).toLocaleString()})`);
+      console.log(`[WhatsApp] Last message timestamp: ${messages[messages.length-1].timestamp} (${new Date(messages[messages.length-1].timestamp * 1000).toLocaleString()})`);
+    }
     const filtered = messages
       .filter(m => days === 0 || m.timestamp >= cutoff)
       .map(m => ({
