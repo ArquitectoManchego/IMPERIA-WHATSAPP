@@ -6,21 +6,13 @@ import { getClients, saveClientFromGoogle } from '@/lib/firebase-server';
 
 export async function GET() {
   const session: any = await getServerSession(authOptions);
-  console.log('[SyncAPI] GET Request. Session authenticated:', !!session);
-  if (session) {
-    console.log('[SyncAPI] Scopes returned:', session.scope);
-  }
-
+  
   if (!session || !session.accessToken) {
-    console.log('[SyncAPI] Error: Unauthorized (No Google Session)');
-    return NextResponse.json({ error: 'Unauthorized (No Google Session)' }, { status: 401 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    console.log('[SyncAPI] Token present:', !!session.accessToken);
     const contacts = await fetchGoogleContacts(session.accessToken);
-    console.log(`[SyncAPI] Raw Google connections found: ${contacts?.length || 0}`);
-    console.log(`[SyncAPI] Raw Google connections: ${contacts.length}`);
     
     // Map Google contacts to a simpler format for the UI
     const mapped = contacts.map((c: any) => ({
@@ -40,19 +32,49 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const session: any = await getServerSession(authOptions);
-  const { action, contacts, clients } = await request.json();
+  const body = await request.json();
+  const { action, contacts, clients } = body;
 
   if (!session || !session.accessToken) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
+    if (action === 'bulk-edit') {
+      const { selectedContacts, tagsToAdd, tagsToRemove } = body;
+      const results = [];
+
+      for (const contact of selectedContacts) {
+        try {
+          const currentTags = contact.tags || [];
+          let newTags = [...currentTags];
+
+          tagsToAdd.forEach((tag: string) => {
+            if (!newTags.includes(tag)) newTags.push(tag);
+          });
+
+          newTags = newTags.filter((tag: string) => !tagsToRemove.includes(tag));
+
+          // Use the restored name (which now has the new logic)
+          await saveClientFromGoogle({
+            ...contact,
+            tags: newTags
+          });
+          results.push({ id: contact.id, success: true });
+        } catch (err) {
+          results.push({ id: contact.id, success: false, error: err });
+        }
+      }
+      
+      return NextResponse.json({ success: true, message: `Se actualizaron ${results.filter(r => r.success).length} contactos.` });
+    }
+
     if (action === 'import') {
       // Selective Import (Google -> Taylor)
       for (const contact of contacts) {
         await saveClientFromGoogle(contact);
       }
-      return NextResponse.json({ success: true, message: `${contacts.length} contactos importados a Taylor.` });
+      return NextResponse.json({ success: true, message: `${contacts.length} contactos importados.` });
     }
 
     if (action === 'push') {

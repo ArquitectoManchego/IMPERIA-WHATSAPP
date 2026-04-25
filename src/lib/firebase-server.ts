@@ -32,7 +32,7 @@ export const getClients = async () => {
       // Aggregate note numbers: nota_id + any numero_nota in abonos
       const noteNumbers = new Set<string>();
       if (data.nota_id) noteNumbers.add(data.nota_id);
-      if (Array.isArray(data.abonos)) {
+      if (data.abonos && Array.isArray(data.abonos)) {
         data.abonos.forEach((a: any) => {
           if (a.numero_nota) noteNumbers.add(a.numero_nota);
         });
@@ -80,46 +80,65 @@ export const isRegisteredClient = async (phoneNumber: string) => {
   }
 };
 
+// We rename it back to the original name but keep the new logic
 export const saveClientFromGoogle = async (clientData: any) => {
   try {
-    const cleanPhone = clientData.telefono.replace(/\D/g, '');
-    if (!cleanPhone) throw new Error('Phone number is required');
+    const cleanPhone = clientData.telefono?.replace(/\D/g, '') || '';
+    if (!cleanPhone && !clientData.id) throw new Error('Phone or ID is required');
 
-    // Check if exists
-    const existing = await isRegisteredClient(cleanPhone);
+    // Check if exists in Taylor by phone
+    const existing = cleanPhone ? await isRegisteredClient(cleanPhone) : null;
     const clientsPath = getClientsPath();
-    const clientsRef = collection(db, clientsPath);
-
-    if (existing && existing.id) {
-      const docRef = doc(db, clientsPath, existing.id);
-      await setDoc(docRef, {
-        ...existing,
-        nombre: clientData.nombre || existing.nombre,
-        email: clientData.email || existing.email || '',
-        status: existing.status === 'Importado Google' ? 'Importado Google' : existing.status,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-      return existing.id;
-    }
-
-    const newDocRef = doc(clientsRef);
-    const id = newDocRef.id;
-
-    const dataToSave = {
-      nombre: clientData.nombre,
-      telefono: cleanPhone,
-      email: clientData.email || '',
-      id,
-      genero: 'indefinido',
-      status: 'Importado Google',
+    
+    let docRef;
+    let dataToSave: any = {
       updatedAt: serverTimestamp(),
-      createdAt: serverTimestamp(),
     };
 
-    await setDoc(newDocRef, dataToSave);
-    return id;
+    if (existing) {
+      // Update existing
+      docRef = doc(db, clientsPath, existing.id);
+      dataToSave = {
+        ...existing,
+        ...dataToSave,
+        nombre: clientData.nombre || existing.nombre,
+        email: clientData.email || existing.email || '',
+        tags: clientData.tags || existing.tags || [],
+        empresa: clientData.empresa ?? existing.empresa ?? '',
+        cargo: clientData.cargo ?? existing.cargo ?? '',
+        direccion: clientData.direccion ?? existing.direccion ?? '',
+        notas: clientData.notas ?? existing.notas ?? '',
+        birthday: clientData.birthday ?? existing.birthday ?? '',
+      };
+    } else {
+      // Create new (Import from Google or Manual)
+      const cleanId = clientData.id ? clientData.id.replace(/\//g, '_') : doc(collection(db, clientsPath)).id;
+      docRef = doc(db, clientsPath, cleanId);
+      dataToSave = {
+        nombre: clientData.nombre || 'Sin Nombre',
+        telefono: cleanPhone,
+        email: clientData.email || '',
+        id: cleanId,
+        genero: 'indefinido',
+        status: 'Importado Google',
+        tags: clientData.tags || [],
+        empresa: clientData.empresa || '',
+        cargo: clientData.cargo || '',
+        direccion: clientData.direccion || '',
+        notas: clientData.notas || '',
+        birthday: clientData.birthday || '',
+        createdAt: serverTimestamp(),
+        ...dataToSave,
+      };
+    }
+
+    await setDoc(docRef, dataToSave, { merge: true });
+    return docRef.id;
   } catch (error) {
-    console.error('Error saving client from Google:', error);
+    console.error('Error in saveClientFromGoogle:', error);
     throw error;
   }
 };
+
+// Maintain alias just in case
+export const upsertClient = saveClientFromGoogle;
