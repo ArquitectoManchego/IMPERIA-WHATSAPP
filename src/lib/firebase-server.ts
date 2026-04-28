@@ -142,3 +142,54 @@ export const saveClientFromGoogle = async (clientData: any) => {
 
 // Maintain alias just in case
 export const upsertClient = saveClientFromGoogle;
+
+export const saveWhatsAppMessage = async (chatId: string, msg: any) => {
+  try {
+    const clientsPath = getClientsPath();
+    const cleanId = chatId.replace(/\D/g, '');
+    
+    // Find client by phone to get the correct document ID
+    const client = await isRegisteredClient(cleanId);
+    const targetId = client ? client.id : cleanId;
+    
+    const messageId = msg.id?.id || msg.id || doc(collection(db, 'tmp')).id;
+    const msgRef = doc(db, `${clientsPath}/${targetId}/whatsapp_messages`, messageId);
+    
+    await setDoc(msgRef, {
+      body: msg.body || '',
+      from: msg.from?._serialized || msg.from,
+      to: msg.to?._serialized || msg.to,
+      fromMe: !!msg.fromMe,
+      timestamp: msg.timestamp || msg.t || Math.floor(Date.now() / 1000),
+      type: msg.type || 'chat',
+      hasMedia: !!msg.hasMedia || !!msg.mediaData,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    
+    return true;
+  } catch (error) {
+    console.error('[Firebase] Error saving message:', error);
+    return false;
+  }
+};
+
+export const getStoredMessages = async (chatId: string, limitCount = 50) => {
+  try {
+    const clientsPath = getClientsPath();
+    const cleanId = chatId.replace(/\D/g, '');
+    const client = await isRegisteredClient(cleanId);
+    const targetId = client ? client.id : cleanId;
+    
+    const msgsRef = collection(db, `${clientsPath}/${targetId}/whatsapp_messages`);
+    const q = query(msgsRef); // You might want to order by timestamp but for simplicity now:
+    const snapshot = await getDocs(q);
+    
+    return snapshot.docs
+      .map(doc => doc.data())
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .slice(-limitCount);
+  } catch (error) {
+    console.error('[Firebase] Error fetching messages:', error);
+    return [];
+  }
+};

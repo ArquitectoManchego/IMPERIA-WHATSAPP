@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "powershell -Command \"Get-NetTCPConnection -LocalPort 3010 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Stop-Process -Name chrome -Force -ErrorAction SilentlyContinue; Stop-Process -Name chromium -Force -ErrorAction SilentlyContinue; exit 0\"",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

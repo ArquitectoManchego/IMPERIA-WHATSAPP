@@ -38,6 +38,7 @@ export default function DashboardPage() {
   const [selectedChat, setSelectedChat] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [hasInitialized, setHasInitialized] = useState(false);
 
 
 
@@ -78,15 +79,63 @@ export default function DashboardPage() {
   const [syncedPhones, setSyncedPhones] = useState<Set<string>>(new Set());
   const [attachment, setAttachment] = useState<string | null>(null);
 
+  // Debug Logs State
+  const [systemLogs, setSystemLogs] = useState<string[]>([]);
+  const [showDebug, setShowDebug] = useState(false);
+  const [screenshot, setScreenshot] = useState<string | null>(null);
+
+  // Poll for logs
+  useEffect(() => {
+    let interval: any;
+    const fetchLogs = async () => {
+      try {
+        const res = await fetch('/api/whatsapp/logs');
+        const data = await res.json();
+        if (Array.isArray(data)) setSystemLogs(data);
+      } catch (e) {}
+    };
+
+    const fetchScreenshot = async () => {
+      if (!showDebug) return;
+      try {
+        const res = await fetch('/api/whatsapp/screenshot');
+        const data = await res.json();
+        if (data.screenshot) setScreenshot(data.screenshot);
+      } catch (e) {}
+    };
+
+    if (showDebug || loadingMessages || loading) {
+      fetchLogs();
+      if (showDebug) fetchScreenshot();
+      
+      interval = setInterval(() => {
+        fetchLogs();
+      }, 3000);
+
+      // Separate slow interval for screenshots
+      const screenshotInterval = setInterval(() => {
+        if (showDebug) fetchScreenshot();
+      }, 60000);
+
+      return () => {
+        clearInterval(interval);
+        clearInterval(screenshotInterval);
+      };
+    }
+  }, [showDebug, loadingMessages, loading]);
+
   // Fetch messages when chat is selected and synced
   useEffect(() => {
     const fetchMessages = async () => {
-      if (!selectedChat || !syncedPhones.has(selectedChat.id)) {
+      if (!selectedChat) return;
+      
+      if (!syncedPhones.has(selectedChat.id)) {
         setMessages([]);
         return;
       }
       
       try {
+        console.log(`[Dashboard] Requesting messages for: ${selectedChat.id} (Name: ${selectedChat.name})`);
         setLoadingMessages(true);
         const res = await fetch(`/api/whatsapp/messages?chatId=${encodeURIComponent(selectedChat.id)}&limit=${messageLimit}&days=${daysToLoad}`);
         const data = await res.json();
@@ -102,11 +151,6 @@ export default function DashboardPage() {
         }
       } catch (err) {
         console.error('Error fetching messages:', err);
-        toast({
-          title: "Error de conexión",
-          description: "No se pudo conectar con el motor de WhatsApp.",
-          variant: "destructive"
-        });
       } finally {
         setLoadingMessages(false);
       }
@@ -181,12 +225,15 @@ export default function DashboardPage() {
         }
 
         setClients(formattedChats);
-        if (matched) {
-          setSelectedChat(matched);
-          // Auto-sync if coming from a direct link
-          setSyncedPhones(prev => new Set(prev).add(matched.id));
-        } else if (formattedChats.length > 0 && !phoneParam) {
-          setSelectedChat(formattedChats[0]);
+        
+        if (!hasInitialized) {
+          if (matched) {
+            setSelectedChat(matched);
+            setSyncedPhones(prev => new Set(prev).add(matched.id));
+          } else if (formattedChats.length > 0 && !phoneParam) {
+            setSelectedChat(formattedChats[0]);
+          }
+          setHasInitialized(true);
         }
 
       } catch (err) {
@@ -196,7 +243,7 @@ export default function DashboardPage() {
       }
     };
     fetchInitialData();
-  }, [phoneParam]);
+  }, [phoneParam, hasInitialized]);
 
   const toggleSync = (e: React.MouseEvent, chatId: string) => {
     e.stopPropagation();
@@ -206,6 +253,11 @@ export default function DashboardPage() {
       else next.add(chatId);
       return next;
     });
+  };
+
+  const handleChatSelect = (chat: any) => {
+    console.log(`[UI] Selecting Chat: ${chat.name} (${chat.id})`);
+    setSelectedChat(chat);
   };
 
   const handleSendMessage = async () => {
@@ -283,8 +335,15 @@ export default function DashboardPage() {
             <div className="flex items-center gap-4">
               <h2 className="text-2xl font-black text-white tracking-tight">Mensajes</h2>
               <WhatsAppStatus />
-            </div>
-            <div className="flex gap-2">
+            </div>            <div className="flex gap-2">
+              <Button 
+                size="icon" 
+                variant="ghost" 
+                onClick={() => setShowDebug(!showDebug)}
+                className={cn("rounded-xl transition-all", showDebug ? "bg-emerald-500/20 text-emerald-500" : "hover:bg-white/5 text-slate-400")}
+              >
+                <Sparkles className="w-5 h-5" />
+              </Button>
               <Button size="icon" variant="ghost" className="rounded-xl hover:bg-white/5 text-slate-400">
                 <Filter className="w-5 h-5" />
               </Button>
@@ -320,7 +379,7 @@ export default function DashboardPage() {
             filteredClients.map((chat) => (
               <div 
                 key={chat.id}
-                onClick={() => setSelectedChat(chat)}
+                onClick={() => handleChatSelect(chat)}
                 className={cn(
                   "group p-4 rounded-[1.5rem] cursor-pointer transition-all duration-300 flex gap-4 relative items-center",
                   selectedChat?.id === chat.id 
@@ -383,9 +442,14 @@ export default function DashboardPage() {
                 </div>
                 <div>
                   <h3 className="font-bold text-white tracking-tight">{selectedChat.name || 'Selecciona un chat'}</h3>
-                  <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">
-                    ID: {selectedChat.phone}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">
+                      ID: {selectedChat.id}
+                    </p>
+                    {selectedChat.id.includes('@g.us') && (
+                      <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-500 text-[8px] font-black rounded border border-amber-500/20">GRUPO</span>
+                    )}
+                  </div>
                 </div>
               </div>
               
@@ -485,7 +549,7 @@ export default function DashboardPage() {
                           }`}>
                             {msg.body}
                             <div className={`text-[9px] mt-2 opacity-50 ${msg.fromMe ? 'text-right' : 'text-left'} font-bold`}>
-                              {new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                               {msg.timestamp ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                             </div>
                           </div>
                         </div>
@@ -495,8 +559,6 @@ export default function DashboardPage() {
                 </>
               )}
             </div>
-
-
 
             <footer className="p-8 glass z-10 border-t border-white/5">
               <div className="flex items-center gap-4">
@@ -605,6 +667,98 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
+
+      {/* 4. Debug Window */}
+      {showDebug && (
+        <div 
+          className="fixed bottom-8 right-8 w-[450px] min-h-[400px] h-[750px] bg-black/90 backdrop-blur-xl border border-emerald-500/30 rounded-2xl shadow-2xl z-[100] flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-300"
+          style={{ resize: 'both' }}
+        >
+          <header className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5 shrink-0">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Monitor de Sistema</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={async () => {
+                  await fetch('/api/whatsapp/logs', { method: 'DELETE' });
+                  setSystemLogs([]);
+                }}
+                className="text-[9px] font-black uppercase text-slate-500 hover:text-white px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-all"
+              >
+                Limpiar
+              </button>
+              <button onClick={() => setShowDebug(false)} className="text-slate-500 hover:text-white transition-colors ml-2">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </header>
+
+          <div className="flex-1 flex flex-col min-h-0">
+            {/* Logs Area */}
+            <div className="flex-[2] p-4 overflow-y-auto custom-scrollbar font-mono text-[10px] space-y-1 bg-black/40">
+              {systemLogs.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-slate-600 italic">
+                  Esperando eventos del sistema...
+                </div>
+              ) : (
+                systemLogs.map((log, i) => {
+                  const isError = log.includes('❌') || log.includes('Error') || log.includes('Failed');
+                  const isSuccess = log.includes('✅') || log.includes('Success');
+                  const isInfo = log.includes('🔹');
+                  
+                  return (
+                    <div 
+                      key={i} 
+                      className={cn(
+                        "py-0.5 border-l-2 pl-2 transition-colors",
+                        isError ? "text-rose-400 border-rose-500 bg-rose-500/5" : 
+                        isSuccess ? "text-emerald-400 border-emerald-500 bg-emerald-500/5" :
+                        isInfo ? "text-sky-400 border-sky-500 bg-sky-500/5" :
+                        "text-slate-400 border-slate-700"
+                      )}
+                    >
+                      <span className="opacity-50 mr-2 text-[8px]">
+                        [{new Date().toLocaleTimeString()}]
+                      </span>
+                      {log}
+                    </div>
+                  );
+                })
+              )}
+              <div id="logs-end" />
+            </div>
+
+            {/* Browser Preview Area */}
+            {screenshot && (
+              <div className="flex-[3] p-4 border-t border-white/10 bg-black/60 flex flex-col min-h-[300px]">
+                <div className="flex items-center justify-between mb-2 shrink-0">
+                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Navegador Interno (Vista Móvil)</p>
+                  <button 
+                    onClick={() => {
+                      const newWindow = window.open();
+                      if (newWindow) {
+                        newWindow.document.write(`<html><body style="margin:0;display:flex;justify-content:center;align-items:center;background:#000;"><img src="${screenshot}" style="max-width:100%;max-height:100vh;object-fit:contain;" /></body></html>`);
+                        newWindow.document.close();
+                      }
+                    }}
+                    className="text-[8px] font-black text-emerald-500 hover:text-emerald-400 uppercase bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 transition-all"
+                  >
+                    Pantalla Completa
+                  </button>
+                </div>
+                <div className="flex-1 relative rounded-xl overflow-hidden border border-white/10 bg-slate-900 group shadow-inner">
+                  <img src={screenshot} alt="WA Web Screenshot" className="w-full h-full object-contain" />
+                  <div className="absolute top-2 right-2 flex gap-1">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
