@@ -110,7 +110,7 @@ export default function DashboardPage() {
       
       interval = setInterval(() => {
         fetchLogs();
-      }, 3000);
+      }, 5000);
 
       // Separate slow interval for screenshots
       const screenshotInterval = setInterval(() => {
@@ -125,37 +125,41 @@ export default function DashboardPage() {
   }, [showDebug, loadingMessages, loading]);
 
   // Fetch messages when chat is selected and synced
-  useEffect(() => {
-    const fetchMessages = async () => {
-      if (!selectedChat) return;
+  const fetchMessages = async (isPoll = false) => {
+    if (!selectedChat) return;
+    
+    if (!syncedPhones.has(selectedChat.id)) {
+      setMessages([]);
+      return;
+    }
+    
+    try {
+      if (!isPoll) setLoadingMessages(true);
+      const res = await fetch(`/api/whatsapp/messages?chatId=${encodeURIComponent(selectedChat.id)}&limit=${messageLimit}&days=${daysToLoad}`);
+      const data = await res.json();
       
-      if (!syncedPhones.has(selectedChat.id)) {
-        setMessages([]);
-        return;
-      }
-      
-      try {
-        console.log(`[Dashboard] Requesting messages for: ${selectedChat.id} (Name: ${selectedChat.name})`);
-        setLoadingMessages(true);
-        const res = await fetch(`/api/whatsapp/messages?chatId=${encodeURIComponent(selectedChat.id)}&limit=${messageLimit}&days=${daysToLoad}`);
-        const data = await res.json();
-        
-        if (res.ok && Array.isArray(data)) {
-          setMessages(data);
-        } else {
-          toast({
-            title: "Error al sincronizar",
-            description: data.error || "No se pudieron obtener los mensajes.",
-            variant: "destructive"
-          });
+      if (res.ok && Array.isArray(data)) {
+        // Only update if message count changed or first load
+        if (data.length !== messages.length || !isPoll) {
+           setMessages(data);
         }
-      } catch (err) {
-        console.error('Error fetching messages:', err);
-      } finally {
-        setLoadingMessages(false);
-      }
-    };
+      } 
+    } catch (err) {
+      console.error('Error fetching messages:', err);
+    } finally {
+      if (!isPoll) setLoadingMessages(false);
+    }
+  };
+
+  useEffect(() => {
     fetchMessages();
+    
+    // Set up polling for new messages every 5 seconds
+    const pollInterval = setInterval(() => {
+      fetchMessages(true);
+    }, 5000);
+    
+    return () => clearInterval(pollInterval);
   }, [selectedChat, messageLimit, daysToLoad, syncedPhones]);
 
   useEffect(() => {
@@ -677,7 +681,7 @@ export default function DashboardPage() {
           <header className="p-4 border-b border-white/10 flex items-center justify-between bg-white/5 shrink-0">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Monitor de Sistema</span>
+              <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Monitor de Motor WhatsApp</span>
             </div>
             <div className="flex items-center gap-2">
               <button 
@@ -719,9 +723,6 @@ export default function DashboardPage() {
                         "text-slate-400 border-slate-700"
                       )}
                     >
-                      <span className="opacity-50 mr-2 text-[8px]">
-                        [{new Date().toLocaleTimeString()}]
-                      </span>
                       {log}
                     </div>
                   );

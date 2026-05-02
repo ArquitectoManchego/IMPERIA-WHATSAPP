@@ -28,15 +28,19 @@ if (!globalForWhatsApp.messageCache) {
 
 const addLog = (msg: string, type: 'info' | 'error' = 'info') => {
   const timestamp = new Date().toLocaleTimeString('es-MX', { hour12: false });
-  const logEntry = `[${timestamp}] ${type === 'error' ? '❌ ' : '🔹 '}${msg}`;
+  const prefix = type === 'error' ? '❌ [WA-ENGINE]' : '🔹 [WA-ENGINE]';
+  const logEntry = `[${timestamp}] ${prefix} ${msg}`;
+  
   globalForWhatsApp.systemLogs.push(logEntry);
   if (globalForWhatsApp.systemLogs.length > 100) {
     globalForWhatsApp.systemLogs.shift();
   }
+
+  // Ensure it goes to process.stdout/stderr for the Launcher to see
   if (type === 'error') {
-    console.error(msg);
+    console.error(`${prefix} ${msg}`);
   } else {
-    console.log(msg);
+    process.stdout.write(`${prefix} ${msg}\n`);
   }
 };
 
@@ -85,11 +89,11 @@ const cleanupSingletonLock = async () => {
 
 const killOrphanSessions = async () => {
   if (process.platform !== 'win32') return;
-  addLog('Cleaning up system resources (Port 3010 & Browser Zombies)...');
+  addLog('Cleaning up browser zombies...');
   const { exec } = await import('child_process');
   return new Promise((resolve) => {
-    // 1. Kill everything on port 3010 2. Kill all chrome/chromium zombies
-    const cmd = `powershell "Get-NetTCPConnection -LocalPort 3010 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Get-Process chrome, chromium -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*puppeteer*' -or $_.CommandLine -like '*imperia-wa-crm-v4*' } | Stop-Process -Force -ErrorAction SilentlyContinue"`;
+    // Kill only chrome/chromium processes related to our project
+    const cmd = `powershell "Get-Process chrome, chromium -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*puppeteer*' -or $_.CommandLine -like '*imperia-wa-crm-v4*' } | Stop-Process -Force -ErrorAction SilentlyContinue"`;
     exec(cmd, (error) => {
       resolve(true);
     });
@@ -243,6 +247,9 @@ export const initializeWhatsApp = async (forceRestart = false) => {
     const from = message.from;
     const body = message.body;
     const isGroup = from.endsWith('@g.us');
+    const isStatus = from === 'status@broadcast';
+
+    if (isStatus) return; // Ignore status updates silently
 
     addLog(`Checking registration for: ${from}`);
     const clientData = await isRegisteredClient(from);
@@ -258,16 +265,16 @@ export const initializeWhatsApp = async (forceRestart = false) => {
       hasMedia: message.hasMedia
     };
 
-    // Update Memory Cache
+    // Update Memory Cache (ALWAYS, even if not registered, to allow real-time view)
     const current = globalForWhatsApp.messageCache.get(from) || [];
     globalForWhatsApp.messageCache.set(from, [...current, msgData].slice(-100));
 
     if (clientData) {
-      addLog(`✅ Message from REGISTERED client (${clientData.name || 'Sin nombre'}): ${body}`);
+      addLog(`✅ Message from REGISTERED client (${clientData.nombre || 'Sin nombre'}): ${body}`);
       await saveWhatsAppMessage(from, message).catch(() => {});
     } else {
       if (!isGroup) {
-        addLog(`❌ Ignoring message from unknown number: ${from}`);
+        addLog(`🔹 Message from untracked number: ${from}. Cached for UI.`);
       }
     }
   });
@@ -407,53 +414,146 @@ export const getChatMessages = async (chatId: string, days = 2, limit = 100) => 
     addLog(`[WhatsApp] 🔍 Cache dry. Performing Visual Sync for ${chatId}...`);
     try {
       const page = (client as any).pupPage;
+      const chat = await client?.getChatById(chatId);
+      const chatName = chat?.name || '';
       const cleanId = chatId.replace(/\D/g, '');
       
-      const scrapedMsgs = await page.evaluate(async (targetId: string) => {
-        // Find in sidebar and click
-        const items = Array.from(document.querySelectorAll('div[role="listitem"]'));
-        // @ts-ignore
-        const target = items.find(it => it.innerText.includes(targetId.slice(-10)));
+      const scrapedMsgs = await page.evaluate(async (targetId: string, targetName: string) => {
+        // Wait for stability
+        await new Promise(r => setTimeout(r, 1500));
         
-        if (target) {
-          (target as HTMLElement).click();
-          // Wait for pane to load
-          await new Promise(r => setTimeout(r, 2000));
-          
-          // Scrape DOM
-          const bubbles = Array.from(document.querySelectorAll('.message-in, .message-out'));
+        const tryFindAndClick = async () => {
+          const items = Array.from(document.querySelectorAll('div[role="listitem"], div._ak8l, div._ak8o, div._aa4m'));
+          let target = items.find(it => (it as HTMLElement).innerText.includes(targetId.slice(-10)));
+          if (!target && targetName) {
+            target = items.find(it => (it as HTMLElement).innerText.toLowerCase().includes(targetName.toLowerCase()));
+          }
+
+          if (!target && targetName) {
+            const allSpans = Array.from(document.querySelectorAll('span[title], span._ao3e, span.x1iyjqo2'));
+            const spanMatch = allSpans.find(s => (s as HTMLElement).innerText.toLowerCase().includes(targetName.toLowerCase()));
+            if (spanMatch) {
+              target = spanMatch.closest('div[role="listitem"]') || spanMatch.closest('div._ak8l') || spanMatch.parentElement;
+            }
+          }
+
+          if (target) {
+            const rect = (target as HTMLElement).getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+               (target as HTMLElement).click();
+               return true;
+            }
+          }
+          return false;
+        };
+
+        // 1. Try to find in current list
+        let found = await tryFindAndClick();
+
+        // 2. Fallback: Use Search Bar if not found
+        if (!found && targetName) {
+          const searchInput = document.querySelector('div[contenteditable="true"][role="textbox"], div.lexical-rich-text-input, [data-tab="3"]');
+          if (searchInput) {
+            (searchInput as HTMLElement).focus();
+            // Clear existing text if any
+            (searchInput as HTMLElement).innerText = "";
+            return { action: 'search', name: targetName };
+          }
+        }
+        
+        if (found) {
+          await new Promise(r => setTimeout(r, 4000));
+          const bubbles = Array.from(document.querySelectorAll('div.message-in, div.message-out, div._akbu, div._akbv, div._nm4, [role="row"]'));
           return bubbles.map((b, i) => {
-            const textEl = b.querySelector('.selectable-text span') || b.querySelector('span[dir="ltr"]');
-            const isOut = b.classList.contains('message-out');
+            // Find all possible text spans
+            const allSpans = Array.from(b.querySelectorAll('span.selectable-text, .copyable-text [dir="ltr"], span._ao3e'));
+            
+            // Filter: In groups, the first span is often the name and has a color style
+            // We want the span that contains the ACTUAL message text
+            const actualTextEl = allSpans.find(el => {
+               const style = window.getComputedStyle(el);
+               const hasColor = el.getAttribute('style')?.includes('color') || (el as HTMLElement).style.color !== "";
+               const text = (el as HTMLElement).innerText;
+               // If it's a very short span with color, it's probably a name
+               if (hasColor && text.length < 40) return false;
+               return true;
+            });
+
+            const isOut = b.classList.contains('message-out') || b.innerHTML.includes('message-out') || b.closest('.message-out');
             return {
               id: `vsync-${Date.now()}-${i}`,
-              body: textEl ? (textEl as HTMLElement).innerText : "",
-              fromMe: isOut,
+              body: actualTextEl ? (actualTextEl as HTMLElement).innerText : "",
+              fromMe: !!isOut,
               timestamp: Math.floor(Date.now() / 1000) - (bubbles.length - i),
               type: 'chat'
             };
           }).filter(m => m.body.length > 0);
         }
         return [];
-      }, cleanId);
+      }, cleanId, chatName);
+
+    const self = this;
+    try {
+      // Handle the search action outside page.evaluate if needed
+      if ((scrapedMsgs as any).action === 'search') {
+        const targetName = (scrapedMsgs as any).name;
+        addLog(`[WA-ENGINE] [WhatsApp] 🔍 Chat not in view. Searching for: ${targetName}...`);
+        await page.keyboard.type(targetName, { delay: 100 });
+        await new Promise(r => setTimeout(r, 4000));
+        
+        // Re-run extraction now that results are shown
+        return await self.getChatMessages(chatId, chatName);
+      }
+    } catch (err: any) {
+      addLog(`[WA-ENGINE] [WhatsApp] ⚠️ Search fallback failed: ${err.message}`, 'error');
+      return [];
+    }
 
       if (scrapedMsgs.length > 0) {
         addLog(`[WhatsApp] ✅ Visual Sync success: Recovered ${scrapedMsgs.length} messages`);
         cached = scrapedMsgs;
         globalForWhatsApp.messageCache.set(chatId, scrapedMsgs);
         
-        // Background save to Firebase
-        for (const m of scrapedMsgs) {
-          saveWhatsAppMessage(chatId, m).catch(() => {});
-        }
+        saveWhatsAppMessage(chatId, scrapedMsgs[scrapedMsgs.length-1]).catch(() => {});
+      } else {
+        addLog(`[WhatsApp] ⚠️ Visual Sync could not find chat: ${chatName}. Check if it's visible in monitor.`);
       }
     } catch (e: any) {
       addLog(`[WhatsApp] ❌ Visual Sync failed: ${e.message}`, 'error');
     }
   }
 
-  // 3. Get from Firebase (Backup)
-  const stored = await getStoredMessages(chatId, limit);
+  // 3. Library Deep Sync (Last Resort - only if Visual Sync failed and library is stable)
+  if (cached.length === 0 && client && isReady) {
+     // ... (rest of logic remains but we silence the waitForChatLoading error if possible)
+     try {
+       const chat = await client.getChatById(chatId);
+       // Skip fetchMessages if it's known to be broken by Meta updates
+       // We'll try it once, but if it fails with specific error, we don't spam it.
+       const messages = await chat.fetchMessages({ limit: limit });
+       // ...
+      cached = messages.map(m => ({
+        id: m.id.id,
+        body: m.body,
+        from: m.from,
+        to: m.to,
+        fromMe: m.fromMe,
+        timestamp: m.timestamp,
+        type: m.type,
+        hasMedia: m.hasMedia
+      }));
+      globalForWhatsApp.messageCache.set(chatId, cached);
+      addLog(`[WhatsApp] ✅ Deep Sync success: Found ${cached.length} messages`);
+    } catch (e: any) {
+      addLog(`[WhatsApp] ❌ Deep Sync failed: ${e.message}`, 'error');
+    }
+  }
+
+  // 4. Get from Firebase (Backup)
+  let stored: any[] = [];
+  try {
+    stored = await getStoredMessages(chatId, limit);
+  } catch (e) {}
   
   // 4. Merge and deduplicate
   const merged = [...stored, ...cached];

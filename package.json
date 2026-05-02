@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "powershell -Command \"Get-NetTCPConnection -LocalPort 3010 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Stop-Process -Name chrome -Force -ErrorAction SilentlyContinue; Stop-Process -Name chromium -Force -ErrorAction SilentlyContinue; exit 0\"",
-    "dev": "next dev",
+    "predev": "powershell -Command \"Get-CimInstance Win32_Process -Filter \\\"Name = 'node.exe'\\\" | Where-Object { $_.CommandLine -like '*IMPERIA-WHATSAPP*' } | ForEach-Object { Stop-Process $_.ProcessId -Force -ErrorAction SilentlyContinue }; Stop-Process -Name chrome -Force -ErrorAction SilentlyContinue; Stop-Process -Name chromium -Force -ErrorAction SilentlyContinue; exit 0\"",
+    "dev": "next dev -p 3010",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
