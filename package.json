@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "powershell -Command \"Get-CimInstance Win32_Process -Filter \\\"Name = 'node.exe'\\\" | Where-Object { $_.CommandLine -like '*IMPERIA-WHATSAPP*' } | ForEach-Object { Stop-Process $_.ProcessId -Force -ErrorAction SilentlyContinue }; Stop-Process -Name chrome -Force -ErrorAction SilentlyContinue; Stop-Process -Name chromium -Force -ErrorAction SilentlyContinue; exit 0\"",
+    "predev": "powershell -Command \"Get-CimInstance Win32_Process -Filter \\\"Name = 'node.exe'\\\" | Where-Object { $_.CommandLine -like '*IMPERIA-WHATSAPP*' } | ForEach-Object { Stop-Process $_.ProcessId -Force -ErrorAction SilentlyContinue }; Stop-Process -Name chrome -Force -ErrorAction SilentlyContinue; Stop-Process -Name chromium -Force -ErrorAction SilentlyContinue; Write-Host 'Iniciando OpenWA Gateway...'; Start-Process -FilePath \\\"npm\\\" -ArgumentList \\\"run start\\\" -WorkingDirectory \\\"C:\\\\Users\\\\Alex\\\\PROYECTOS ANTIGRAVITY\\\\openwa-gateway\\\" -NoNewWindow; Write-Host 'Esperando 8 segundos para inicializacion...'; Start-Sleep -Seconds 8; exit 0\"",
     "dev": "next dev -p 3010",
     "build": "next build",
     "start": "next start",
@@ -12,6 +12,7 @@
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-toast": "^1.2.15",
+    "axios": "^1.16.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "firebase": "^12.11.0",
