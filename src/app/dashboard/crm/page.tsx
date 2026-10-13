@@ -252,9 +252,9 @@ export default function CrmKanbanPage() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[#030712] text-slate-100 overflow-hidden">
+    <div className="flex flex-col h-full bg-[#030712] text-slate-100 overflow-hidden">
       {/* Top Header */}
-      <header className="px-6 py-4 border-b border-white/5 glass flex flex-wrap items-center justify-between gap-4 shrink-0 z-10">
+      <header className="px-4 sm:px-6 py-4 border-b border-white/5 glass flex flex-wrap items-center justify-between gap-4 shrink-0 z-10">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center ring-1 ring-emerald-500/30">
             <KanbanIcon className="w-5 h-5" />
@@ -360,7 +360,7 @@ export default function CrmKanbanPage() {
       </header>
 
       {/* Main Board Content */}
-      <div className="flex-1 overflow-x-auto p-6 overflow-y-hidden">
+      <div className="flex-1 overflow-x-auto p-4 sm:p-6 overflow-y-hidden touch-pan-x custom-scrollbar">
         {loading ? (
           <div className="flex items-center justify-center h-full text-slate-400 text-sm">
             Cargando tablero Kanban...

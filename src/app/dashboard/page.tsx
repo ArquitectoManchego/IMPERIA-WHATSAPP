@@ -23,7 +23,9 @@ import {
   Download,
   FileDown,
   Zap,
-  Calendar
+  Calendar,
+  ArrowLeft,
+  UserCheck
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -46,6 +48,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [hasInitialized, setHasInitialized] = useState(false);
+  const [showMobileCrm, setShowMobileCrm] = useState(false);
 
 
 
@@ -427,6 +430,19 @@ export default function DashboardPage() {
     }
   };
 
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setAttachment(event.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handlePaste = async (e: React.ClipboardEvent) => {
     const items = e.clipboardData.items;
     for (const item of items) {
@@ -448,11 +464,14 @@ export default function DashboardPage() {
   return (
     <div className="flex h-full w-full relative z-10">
       {/* 1. Chat List Column */}
-      <section className="w-96 border-r border-white/5 flex flex-col glass backdrop-blur-2xl">
-        <header className="p-6">
-          <div className="flex items-center justify-between mb-8">
+      <section className={cn(
+        "w-full md:w-96 border-r border-white/5 flex flex-col glass backdrop-blur-2xl shrink-0 transition-all",
+        selectedChat ? "hidden md:flex" : "flex"
+      )}>
+        <header className="p-4 sm:p-6">
+          <div className="flex items-center justify-between mb-4 sm:mb-8">
             <div className="flex items-center gap-4">
-              <h2 className="text-2xl font-black text-white tracking-tight">Mensajes</h2>
+              <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">Mensajes</h2>
               <WhatsAppStatus />
             </div>            <div className="flex gap-1.5 items-center">
               <Button 
@@ -597,24 +616,38 @@ export default function DashboardPage() {
       </section>
 
       {/* 2. Active Chat Column */}
-      <section className="flex-1 flex flex-col relative overflow-hidden">
+      <section className={cn(
+        "flex-1 flex flex-col relative overflow-hidden",
+        !selectedChat ? "hidden md:flex" : "flex"
+      )}>
         {selectedChat ? (
           <>
             <div className="absolute inset-0 opacity-5 pointer-events-none">
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-emerald-500 rounded-full blur-[160px]" />
             </div>
 
-            <header className="h-24 px-8 border-b border-white/5 flex items-center justify-between glass z-10">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center border border-white/10 overflow-hidden">
+            <header className="h-20 md:h-24 px-4 sm:px-8 border-b border-white/5 flex items-center justify-between glass z-10 shrink-0">
+              <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                {/* Back button on mobile */}
+                <Button 
+                  size="icon" 
+                  variant="ghost" 
+                  onClick={() => setSelectedChat(null)} 
+                  className="md:hidden rounded-xl text-slate-400 hover:text-white shrink-0 -ml-2 h-9 w-9"
+                  title="Volver a la lista de chats"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </Button>
+
+                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-slate-800 flex items-center justify-center border border-white/10 overflow-hidden shrink-0">
                   {selectedChat.avatar ? (
                     <img src={selectedChat.avatar} alt={selectedChat.name} className="w-full h-full object-cover" />
                   ) : (
                     <User className="w-5 h-5 text-slate-400" />
                   )}
                 </div>
-                <div>
-                  <h3 className="font-bold text-white tracking-tight blur-sensitive">{selectedChat.name || 'Selecciona un chat'}</h3>
+                <div className="min-w-0">
+                  <h3 className="font-bold text-white tracking-tight blur-sensitive truncate">{selectedChat.name || 'Selecciona un chat'}</h3>
                   <div className="flex items-center gap-2">
                     <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest blur-sensitive">
                       ID: {selectedChat.id}
@@ -626,24 +659,35 @@ export default function DashboardPage() {
                 </div>
               </div>
               
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1 sm:gap-3 shrink-0">
+                  {/* CRM Drawer toggle on mobile/tablet */}
+                  <Button 
+                    size="icon" 
+                    variant="ghost" 
+                    onClick={() => setShowMobileCrm(!showMobileCrm)}
+                    title="Ver ficha y atributos CRM"
+                    className="xl:hidden rounded-xl hover:bg-white/5 text-slate-400 hover:text-emerald-400 h-9 w-9"
+                  >
+                    <UserCheck className="w-5 h-5" />
+                  </Button>
                   <a
                     href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(`Cita con ${selectedChat.name || selectedChat.id}`)}`}
                     target="_blank"
                     rel="noreferrer"
                     title="Agendar en Google Calendar"
+                    className="hidden sm:inline-flex"
                   >
                     <Button size="icon" variant="ghost" className="rounded-xl hover:bg-white/5 text-slate-400 hover:text-emerald-400">
                       <Calendar className="w-5 h-5" />
                     </Button>
                   </a>
-                  <Button size="icon" variant="ghost" className="rounded-xl hover:bg-white/5 text-slate-400">
+                  <Button size="icon" variant="ghost" className="rounded-xl hover:bg-white/5 text-slate-400 hidden sm:inline-flex">
                     <Video className="w-5 h-5" />
                   </Button>
-                  <Button size="icon" variant="ghost" className="rounded-xl hover:bg-white/5 text-slate-400">
+                  <Button size="icon" variant="ghost" className="rounded-xl hover:bg-white/5 text-slate-400 hidden sm:inline-flex">
                     <Phone className="w-5 h-5" />
                   </Button>
-                  <div className="w-px h-6 bg-white/5 mx-2" />
+                  <div className="w-px h-6 bg-white/5 mx-1 hidden sm:block" />
                   <Button size="icon" variant="ghost" className="rounded-xl hover:bg-white/5 text-slate-400">
                     <Search className="w-5 h-5" />
                   </Button>
@@ -753,36 +797,49 @@ export default function DashboardPage() {
               )}
             </div>
 
-            <footer className="p-8 glass z-10 border-t border-white/5">
-              <div className="flex items-center gap-4">
+            <footer className="p-3 sm:p-6 md:p-8 glass z-10 border-t border-white/5 shrink-0">
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                className="hidden" 
+                accept="image/*,video/*,application/pdf"
+                onChange={handleFileChange}
+              />
+              <div className="flex items-center gap-1.5 sm:gap-4">
                 <Button 
                   size="icon" 
                   variant="ghost" 
                   onClick={() => setIsQuickRepliesOpen(true)}
                   title="Respuestas Rápidas (Plantillas)"
-                  className="rounded-xl text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
+                  className="rounded-xl text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 h-10 w-10 sm:h-12 sm:w-12 shrink-0"
                 >
-                  <Zap className="w-5 h-5" />
+                  <Zap className="w-4 h-4 sm:w-5 sm:h-5" />
                 </Button>
                 <Button 
                   size="icon" 
                   variant="ghost" 
                   onClick={() => setIsAiAssistantOpen(true)}
                   title="Asistente de Redacción Comercial IA"
-                  className="rounded-xl text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                  className="rounded-xl text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 h-10 w-10 sm:h-12 sm:w-12 shrink-0"
                 >
-                  <Sparkles className="w-5 h-5" />
+                  <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
                 </Button>
-                <Button size="icon" variant="ghost" className="rounded-xl text-slate-400 hover:text-white">
-                  <Paperclip className="w-6 h-6" />
+                <Button 
+                  size="icon" 
+                  variant="ghost" 
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Adjuntar imagen o archivo"
+                  className="rounded-xl text-slate-400 hover:text-white h-10 w-10 sm:h-12 sm:w-12 shrink-0"
+                >
+                  <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
                 </Button>
-                <div className="flex-1 relative flex flex-col gap-2">
+                <div className="flex-1 relative flex flex-col gap-2 min-w-0">
                   {attachment && (
-                    <div className="relative w-32 h-32 rounded-xl overflow-hidden border border-emerald-500/30 group mb-2 shadow-2xl">
+                    <div className="relative w-24 h-24 sm:w-32 sm:h-32 rounded-xl overflow-hidden border border-emerald-500/30 group mb-1 shadow-2xl shrink-0">
                       <img src={attachment} alt="Adjunto" className="w-full h-full object-cover" />
                       <button 
                         onClick={() => setAttachment(null)}
-                        className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-1 transition-opacity"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -803,15 +860,15 @@ export default function DashboardPage() {
                       } 
                     }}
                     onPaste={handlePaste}
-                    className="w-full h-14 bg-white/5 border border-white/5 rounded-2xl px-6 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all font-medium"
+                    className="w-full h-11 sm:h-14 bg-white/5 border border-white/5 rounded-2xl px-3 sm:px-6 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all font-medium"
                   />
                 </div>
                 <Button 
                   onClick={handleSendMessage}
                   disabled={sending || (!messageText.trim() && !attachment)}
-                  className="w-14 h-14 bg-emerald-500 hover:bg-emerald-400 text-white rounded-2xl shadow-lg shadow-emerald-900/40 transition-all active:scale-95 shrink-0"
+                  className="w-11 h-11 sm:w-14 sm:h-14 bg-emerald-500 hover:bg-emerald-400 text-white rounded-2xl shadow-lg shadow-emerald-900/40 transition-all active:scale-95 shrink-0"
                 >
-                  {sending ? <Loader2 className="w-6 h-6 animate-spin" /> : <Send className="w-6 h-6" />}
+                  {sending ? <Loader2 className="w-5 h-5 sm:w-6 sm:h-6 animate-spin" /> : <Send className="w-5 h-5 sm:w-6 sm:h-6" />}
                 </Button>
               </div>
             </footer>
@@ -829,8 +886,8 @@ export default function DashboardPage() {
         )}
       </section>
 
-      {/* 3. CRM Context Column */}
-      <section className="w-80 border-l border-white/5 glass flex flex-col backdrop-blur-3xl overflow-y-auto">
+      {/* 3. CRM Context Column - Desktop */}
+      <section className="hidden xl:flex w-80 border-l border-white/5 glass flex-col backdrop-blur-3xl overflow-y-auto shrink-0">
         {selectedChat ? (
           <div className="p-4 flex flex-col h-full">
             <div className="flex flex-col items-center pb-4 border-b border-white/5 mb-4">
@@ -857,6 +914,35 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
+
+      {/* Mobile CRM Slide-over Drawer */}
+      {showMobileCrm && selectedChat && (
+        <div className="fixed inset-0 z-50 xl:hidden flex">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowMobileCrm(false)} />
+          <div className="relative ml-auto w-full max-w-sm h-full bg-slate-950/95 border-l border-white/10 shadow-2xl flex flex-col overflow-y-auto p-4 z-10 animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-4 shrink-0">
+              <span className="text-sm font-bold text-white">Atributos CRM</span>
+              <Button size="icon" variant="ghost" onClick={() => setShowMobileCrm(false)} className="rounded-xl h-8 w-8 text-slate-400 hover:text-white">
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            <div className="flex flex-col items-center pb-4 border-b border-white/5 mb-4 shrink-0">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-blue-500/20 flex items-center justify-center border border-white/10 mb-2 overflow-hidden">
+                {selectedChat.avatar ? (
+                  <img src={selectedChat.avatar} alt={selectedChat.name} className="w-full h-full object-cover" />
+                ) : (
+                  <User className="w-6 h-6 text-white" />
+                )}
+              </div>
+              <h3 className="text-sm font-black text-white text-center">{selectedChat.name || 'Sin Nombre'}</h3>
+              <p className="text-[10px] text-slate-500 font-bold uppercase">{selectedChat.phone || selectedChat.id}</p>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <CrmPanel phone={selectedChat.phone || selectedChat.id} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 4. Debug Window */}
       {showDebug && (
