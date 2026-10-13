@@ -7,7 +7,7 @@ export async function GET(req: Request) {
   const limit = parseInt(searchParams.get('limit') || '100');
   const days = parseInt(searchParams.get('days') || '2');
 
-  if (!chatId) {
+  if (!chatId || !Number.isInteger(limit) || limit < 1 || limit > 500 || !Number.isInteger(days) || days < 0 || days > 36500) {
     return NextResponse.json({ error: 'Chat ID or Phone is required' }, { status: 400 });
   }
 

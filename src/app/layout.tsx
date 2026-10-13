@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+
 import "./globals.css";
 import { FirebaseClientProvider } from "@/firebase";
 import { AuthenticatedLayout } from "./authenticated-layout";
 import { Toaster } from "@/components/ui/toaster";
 
-const inter = Inter({ subsets: ["latin"] });
+
 
 export const metadata: Metadata = {
   title: "Imperia WA - CRM Automático",
@@ -20,7 +20,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es" className={`${inter.className} h-full antialiased dark`}>
+    <html lang="es" className="h-full antialiased dark">
       <body className="min-h-full bg-black flex flex-col">
         <Providers>
           <AuthenticatedLayout>

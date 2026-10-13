@@ -49,3 +49,16 @@ body {
 .animate-float {
   animation: float 6s ease-in-out infinite;
 }
+
+/* Privacy Blur Mode */
+.crm-privacy-blur .blur-sensitive,
+.crm-privacy-blur [data-sensitive="true"] {
+  filter: blur(5px);
+  user-select: none;
+  transition: filter 0.2s ease-in-out;
+}
+.crm-privacy-blur .blur-sensitive:hover,
+.crm-privacy-blur [data-sensitive="true"]:hover {
+  filter: blur(0px);
+}
+

@@ -3,11 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "powershell -Command \"Get-CimInstance Win32_Process -Filter \\\"Name = 'node.exe'\\\" | Where-Object { $_.CommandLine -like '*IMPERIA-WHATSAPP*' } | ForEach-Object { Stop-Process $_.ProcessId -Force -ErrorAction SilentlyContinue }; Stop-Process -Name chrome -Force -ErrorAction SilentlyContinue; Stop-Process -Name chromium -Force -ErrorAction SilentlyContinue; Write-Host 'Iniciando OpenWA Gateway...'; Start-Process -FilePath \\\"npm\\\" -ArgumentList \\\"run start\\\" -WorkingDirectory \\\"C:\\\\Users\\\\Alex\\\\PROYECTOS ANTIGRAVITY\\\\openwa-gateway\\\" -NoNewWindow; Write-Host 'Esperando 8 segundos para inicializacion...'; Start-Sleep -Seconds 8; exit 0\"",
     "dev": "next dev -p 3010",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "start": "next start -p 3010",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit --incremental false",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "check:config": "node --env-file=.env.local scripts/check-config.mjs"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",
@@ -23,7 +25,8 @@
     "next-auth": "^4.24.13",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "tailwind-merge": "^3.5.0"
+    "tailwind-merge": "^3.5.0",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -35,10 +38,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
     "lucide-react": "^1.8.0",
-    "puppeteer": "^24.40.0",
-    "qrcode": "^1.5.4",
     "tailwindcss": "^4",
-    "typescript": "^5",
-    "whatsapp-web.js": "^1.34.6"
+    "typescript": "^5"
   }
 }

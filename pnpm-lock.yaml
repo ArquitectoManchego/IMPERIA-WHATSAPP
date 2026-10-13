@@ -50,6 +50,9 @@ importers:
       tailwind-merge:
         specifier: ^3.5.0
         version: 3.5.0
+      qrcode:
+        specifier: ^1.5.4
+        version: 1.5.4
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4
@@ -81,9 +84,6 @@ importers:
       puppeteer:
         specifier: ^24.40.0
         version: 24.40.0(typescript@5.9.3)
-      qrcode:
-        specifier: ^1.5.4
-        version: 1.5.4
       tailwindcss:
         specifier: ^4
         version: 4.2.2

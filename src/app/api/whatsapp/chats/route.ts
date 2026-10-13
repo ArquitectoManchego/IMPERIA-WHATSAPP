@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getRecentChats } from '@/lib/whatsapp';
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const chats = await getRecentChats(20);
+    const { searchParams } = new URL(req.url);
+    const limit = parseInt(searchParams.get('limit') || '200');
+    const chats = await getRecentChats(limit);
     return NextResponse.json(chats);
   } catch (error: any) {
     console.error('Error fetching recent chats:', error);

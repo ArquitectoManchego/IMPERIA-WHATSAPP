@@ -9,6 +9,7 @@ const globalForWhatsApp = globalThis as unknown as {
     isInitializing: boolean;
     qrCodeData: string | null;
     lastError: string | null;
+    mode?: 'local' | 'remote';
   };
   systemLogs: string[];
   webhookRegistered?: boolean;
@@ -90,6 +91,17 @@ const registerWebhookIfNeeded = async () => {
 export const initializeWhatsApp = async (forceRestart = false) => {
   if (globalForWhatsApp.whatsappStatus.isInitializing && !forceRestart) return;
 
+  const isVercel = process.env.VERCEL === '1';
+  const isLocalhost = baseURL.includes('localhost') || baseURL.includes('127.0.0.1');
+
+  if (isVercel && isLocalhost) {
+    globalForWhatsApp.whatsappStatus.isInitializing = false;
+    globalForWhatsApp.whatsappStatus.lastError =
+      'Gateway no conectado en la nube. Para usar WhatsApp desde Vercel, configura OPENWA_URL en las variables de entorno de Vercel con la URL pública de tu Gateway (ej. túnel Cloudflare/ngrok) o accede localmente en http://localhost:3010.';
+    addLog(globalForWhatsApp.whatsappStatus.lastError, 'error');
+    return;
+  }
+
   globalForWhatsApp.whatsappStatus.isInitializing = true;
   globalForWhatsApp.whatsappStatus.lastError = null;
   addLog('Iniciando sesión en OpenWA Gateway...');
@@ -121,6 +133,12 @@ export const initializeWhatsApp = async (forceRestart = false) => {
         await checkAndUpdateStatus();
         return;
       } catch (createErr: any) {
+        if (createErr.response?.status === 409 || createErr.message?.includes('already exists')) {
+          addLog(`La sesión '${sessionId}' ya existe en OpenWA. Continuando...`);
+          globalForWhatsApp.whatsappStatus.isInitializing = false;
+          await checkAndUpdateStatus();
+          return;
+        }
         addLog(`Fallo al crear o iniciar sesión: ${createErr.message}`, 'error');
         globalForWhatsApp.whatsappStatus.lastError = createErr.message;
       }
@@ -141,13 +159,12 @@ const checkAndUpdateStatus = async () => {
     });
 
     const session = res.data;
-    // Possible OpenWA session states: 'CONNECTED', 'SCAN_QR', 'STARTING', 'INITIALIZING', 'DISCONNECTED'
-    const status = session.status;
+    const status = (session?.status || '').toLowerCase();
     addLog(`Estado de sesión en OpenWA: ${status}`);
 
-    const isConnected = status === 'CONNECTED';
-    const isScanQr = status === 'SCAN_QR';
-    const isStarting = status === 'STARTING' || status === 'INITIALIZING';
+    const isConnected = status === 'ready' || status === 'connected';
+    const isScanQr = status === 'qr_ready' || status === 'scan_qr';
+    const isStarting = status === 'starting' || status === 'initializing' || status === 'authenticating' || status === 'created';
 
     globalForWhatsApp.whatsappStatus.isReady = isConnected;
     globalForWhatsApp.whatsappStatus.isAuthenticated = isConnected;
@@ -166,7 +183,8 @@ const checkAndUpdateStatus = async () => {
           headers: getHeaders(),
           timeout: 5000
         });
-        globalForWhatsApp.whatsappStatus.qrCodeData = qrRes.data.qr || qrRes.data.qrCodeData || qrRes.data;
+        const qr = qrRes.data?.qrCode || qrRes.data?.qr || qrRes.data?.qrCodeData || (typeof qrRes.data === 'string' ? qrRes.data : null);
+        globalForWhatsApp.whatsappStatus.qrCodeData = qr;
         addLog('Código QR obtenido de OpenWA, listo para escanear');
       } catch (qrErr: any) {
         addLog(`Error al obtener QR: ${qrErr.message}`, 'error');
@@ -176,7 +194,17 @@ const checkAndUpdateStatus = async () => {
     }
 
   } catch (error: any) {
-    addLog(`Error al consultar estado en OpenWA: ${error.message}`, 'error');
+    const isVercel = process.env.VERCEL === '1';
+    const isLocalhost = baseURL.includes('localhost') || baseURL.includes('127.0.0.1');
+
+    if (isVercel && isLocalhost) {
+      globalForWhatsApp.whatsappStatus.lastError =
+        'Gateway no conectado en la nube. Configura OPENWA_URL en Vercel con la URL pública de tu Gateway, o utiliza la app local en http://localhost:3010.';
+    } else {
+      addLog(`Error al consultar estado en OpenWA: ${error.message}`, 'error');
+      globalForWhatsApp.whatsappStatus.lastError = error.message;
+    }
+
     globalForWhatsApp.whatsappStatus.isReady = false;
     globalForWhatsApp.whatsappStatus.isAuthenticated = false;
     globalForWhatsApp.whatsappStatus.isInitializing = false;
@@ -184,9 +212,8 @@ const checkAndUpdateStatus = async () => {
   }
 };
 
-export const getWhatsAppStatus = () => {
-  // Trigger an async background status update to keep it fresh
-  checkAndUpdateStatus().catch(() => {});
+export const getWhatsAppStatus = async () => {
+  await checkAndUpdateStatus().catch(() => {});
   return globalForWhatsApp.whatsappStatus;
 };
 
@@ -206,43 +233,131 @@ export const getWhatsAppClient = () => {
   };
 };
 
-export const sendMessage = async (chatId: string, message: string, mediaBase64?: string) => {
+const recentSends = new Map<string, { time: number; result: any }>();
+
+export const sendMessage = async (chatId: string, message: string, mediaBase64?: string, fallbackPhone?: string) => {
   addLog(`Enviando mensaje a ${chatId}...`);
   
-  // Format chatId if needed
-  let finalId = chatId;
-  if (!finalId.includes('@')) {
-    let cleanPhone = finalId.replace(/\D/g, '');
-    if (cleanPhone.length === 10 && !cleanPhone.startsWith('52')) {
-      cleanPhone = '521' + cleanPhone;
-    }
-    finalId = `${cleanPhone}@c.us`;
+  const debounceKey = `${chatId}:${(message || '').trim()}:${mediaBase64 ? 'media' : 'text'}`;
+  const now = Date.now();
+  const cachedSend = recentSends.get(debounceKey);
+  if (cachedSend && (now - cachedSend.time) < 3000) {
+    addLog(`Mensaje idéntico detectado a ${chatId} en menos de 3s. Evitando envío duplicado.`);
+    return cachedSend.result;
   }
 
+  const formatId = (id: string) => {
+    let clean = (id || '').trim();
+    if (!clean.includes('@')) {
+      let digits = clean.replace(/\D/g, '');
+      if (digits.length === 10 && !digits.startsWith('52')) {
+        digits = '521' + digits;
+      }
+      return `${digits}@c.us`;
+    }
+    return clean;
+  };
+
+  let finalId = formatId(chatId);
   const phoneId = finalId.split('@')[0];
+
+  const doSend = async (target: string) => {
+    if (mediaBase64) {
+      addLog(`Mensaje contiene archivo multimedia para ${target}...`);
+
+      const isHttpUrl = mediaBase64.startsWith('http://') || mediaBase64.startsWith('https://');
+      if (isHttpUrl) {
+        return await axios.post(
+          `${baseURL}/sessions/${sessionId}/messages/send-image`,
+          {
+            chatId: target,
+            url: mediaBase64,
+            caption: message || undefined
+          },
+          { headers: getHeaders(), timeout: 30000 }
+        );
+      }
+
+      // Extract mimetype and raw clean base64 data
+      const mimeMatch = mediaBase64.match(/^data:([^;]+);base64,/);
+      const mimetype = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+      const cleanBase64 = mediaBase64.replace(/^data:[^;]+;base64,/, '');
+
+      let endpoint = 'send-image';
+      let extension = 'jpg';
+
+      if (mimetype.startsWith('video/')) {
+        endpoint = 'send-video';
+        extension = mimetype.split('/')[1] || 'mp4';
+      } else if (mimetype.startsWith('audio/')) {
+        endpoint = 'send-audio';
+        extension = mimetype.split('/')[1] || 'mp3';
+      } else if (mimetype.startsWith('image/')) {
+        endpoint = 'send-image';
+        extension = mimetype.split('/')[1] || 'jpg';
+      } else {
+        endpoint = 'send-document';
+        extension = 'bin';
+      }
+
+      const payload = {
+        chatId: target,
+        base64: cleanBase64,
+        mimetype,
+        caption: message || undefined,
+        filename: `attachment_${Date.now()}.${extension}`
+      };
+
+      addLog(`Enviando ${endpoint} (${mimetype}) a ${target}...`);
+      return await axios.post(
+        `${baseURL}/sessions/${sessionId}/messages/${endpoint}`,
+        payload,
+        { headers: getHeaders(), timeout: 30000 }
+      );
+    } else {
+      addLog(`Enviando texto a ${target}...`);
+      return await axios.post(
+        `${baseURL}/sessions/${sessionId}/messages/send-text`,
+        {
+          chatId: target,
+          text: message
+        },
+        { headers: getHeaders(), timeout: 15000 }
+      );
+    }
+  };
 
   try {
     let response;
-    if (mediaBase64) {
-      addLog(`Mensaje contiene multimedia base64. Subiendo y enviando...`);
-      response = await axios.post(`${baseURL}/sessions/${sessionId}/messages/send-file`, {
-        chatId: finalId,
-        url: mediaBase64,
-        caption: message
-      }, { headers: getHeaders() });
-    } else {
-      response = await axios.post(`${baseURL}/sessions/${sessionId}/messages/send-text`, {
-        chatId: finalId,
-        text: message
-      }, { headers: getHeaders() });
+    try {
+      response = await doSend(finalId);
+    } catch (primaryErr: any) {
+      if (fallbackPhone && fallbackPhone !== chatId) {
+        const fallbackId = formatId(fallbackPhone);
+        addLog(`Envío primario a ${finalId} falló: ${primaryErr.message}. Reintentando con fallback: ${fallbackId}...`);
+        response = await doSend(fallbackId);
+        finalId = fallbackId;
+      } else {
+        throw primaryErr;
+      }
     }
 
     addLog(`Mensaje enviado con éxito a ${finalId}`);
 
-    // Firestore Integration: Save sent message immediately for optimistic UI!
     const msgId = response.data.messageId || response.data.id || `msg_sent_${Date.now()}`;
+    const resultObj = { id: { id: msgId } };
+    recentSends.set(debounceKey, { time: Date.now(), result: resultObj });
+
+    // Clean old entries
+    if (recentSends.size > 100) {
+      const cutoff = Date.now() - 10000;
+      for (const [k, v] of recentSends.entries()) {
+        if (v.time < cutoff) recentSends.delete(k);
+      }
+    }
+
     const mockMsg = {
-      id: { id: msgId },
+      id: msgId,
       body: message,
       from: 'me',
       to: finalId,
@@ -252,57 +367,271 @@ export const sendMessage = async (chatId: string, message: string, mediaBase64?:
       hasMedia: !!mediaBase64
     };
 
-    // Save to Firestore asynchronously
-    saveWhatsAppMessage(finalId, mockMsg)
-      .then(() => addLog(`Mensaje saliente guardado en Firestore para ${phoneId}`))
-      .catch((err) => addLog(`Error al guardar mensaje en Firestore: ${err.message}`, 'error'));
+    // Update in-memory cache for all associated identifiers
+    if (!globalCache.messageCache) globalCache.messageCache = {};
+    const targets = new Set([chatId, finalId, fallbackPhone].filter(Boolean) as string[]);
+    targets.forEach(t => {
+      if (!globalCache.messageCache![t]) globalCache.messageCache![t] = [];
+      const list = globalCache.messageCache![t];
+      if (!list.some((m: any) => (m.id?._serialized || m.id?.id || m.id) === msgId)) {
+        list.push(mockMsg);
+      }
+    });
 
-    return {
-      id: { id: msgId }
-    };
+    saveWhatsAppMessage(finalId, mockMsg).catch(() => {});
+
+    return resultObj;
   } catch (error: any) {
     addLog(`Error al enviar mensaje vía OpenWA: ${error.message}`, 'error');
     throw new Error(error.response?.data?.error || error.message || 'Error al enviar mensaje');
   }
 };
 
-export const getRecentChats = async (limit = 20) => {
-  addLog('Obteniendo chats recientes...');
+// In-memory cache & sync status
+const globalCache = globalThis as unknown as {
+  messageCache?: Record<string, any[]>;
+  syncedChats?: any[];
+  syncStatus?: {
+    inProgress: boolean;
+    progress: number;
+    total: number;
+    currentChat: string;
+    lastSyncTime: number | null;
+    totalMessagesSynced: number;
+    error: string | null;
+  };
+};
+
+if (!globalCache.messageCache) globalCache.messageCache = {};
+if (!globalCache.syncedChats) globalCache.syncedChats = [];
+if (!globalCache.syncStatus) {
+  globalCache.syncStatus = {
+    inProgress: false,
+    progress: 0,
+    total: 0,
+    currentChat: '',
+    lastSyncTime: null,
+    totalMessagesSynced: 0,
+    error: null,
+  };
+}
+
+export const getRecentChats = async (limit = 200) => {
+  addLog(`Obteniendo chats recientes (límite: ${limit})...`);
   try {
     const res = await axios.get(`${baseURL}/sessions/${sessionId}/chats`, {
       headers: getHeaders(),
-      timeout: 5000
+      timeout: 10000
     });
 
     const chats = res.data;
     if (Array.isArray(chats)) {
-      return chats.slice(0, limit).map((c: any) => ({
+      const mapped = chats.slice(0, limit).map((c: any) => ({
         id: c.id || c.chatId || c.jid,
         name: c.name || c.pushname || c.id?.split('@')[0] || 'Sin Nombre',
+        phone: c.phone || (c.id?.endsWith('@c.us') ? c.id.split('@')[0] : c.id?.split('@')[0]),
         timestamp: c.timestamp || Math.floor(Date.now() / 1000),
         unreadCount: c.unreadCount || 0,
         lastMessage: c.lastMessage?.body || c.lastMessage || '',
         avatar: c.avatar || ''
       }));
+      globalCache.syncedChats = mapped;
+      return mapped;
     }
   } catch (error: any) {
-    addLog(`Fallo al consultar chats desde OpenWA: ${error.message}. Usando Firestore.`, 'error');
+    addLog(`Fallo al consultar chats desde OpenWA: ${error.message}. Usando caché.`, 'error');
   }
-  return [];
+  return globalCache.syncedChats || [];
 };
 
 export const getChatMessages = async (chatId: string, days = 2, limit = 100) => {
-  addLog(`Obteniendo historial de Firestore para ${chatId}`);
+  addLog(`Consultando mensajes para ${chatId} (límite: ${limit})...`);
+
+  // 1. Fetch directly from OpenWA Gateway for fresh/live messages
+  try {
+    const gatewayRes = await axios.get(
+      `${baseURL}/sessions/${sessionId}/history?chatId=${encodeURIComponent(chatId)}&limit=${limit}`,
+      { headers: getHeaders(), timeout: 8000 }
+    );
+
+    if (Array.isArray(gatewayRes.data) && gatewayRes.data.length > 0) {
+      const liveMessages = gatewayRes.data.map((m: any) => ({
+        id: m.id,
+        body: m.body || '',
+        from: m.from,
+        to: m.to,
+        fromMe: Boolean(m.fromMe),
+        timestamp: Number(m.timestamp || Math.floor(Date.now() / 1000)),
+        type: m.type || 'chat',
+        hasMedia: Boolean(m.hasMedia)
+      })).sort((a: any, b: any) => a.timestamp - b.timestamp);
+
+      if (!globalCache.messageCache) globalCache.messageCache = {};
+      globalCache.messageCache[chatId] = liveMessages;
+
+      // Save to Firestore asynchronously
+      liveMessages.forEach((msg: any) => {
+        saveWhatsAppMessage(chatId, msg).catch(() => {});
+      });
+
+      return liveMessages;
+    }
+  } catch (gwErr: any) {
+    addLog(`Consulta a OpenWA Gateway para ${chatId} falló: ${gwErr.message}. Usando caché.`, 'error');
+  }
+
+  // 2. Fallback to in-memory cache if available
+  if (globalCache.messageCache?.[chatId]?.length) {
+    return globalCache.messageCache[chatId].slice(-limit);
+  }
+
+  // 3. Fallback to Firestore stored messages
   try {
     const messages = await getStoredMessages(chatId, limit);
-    addLog(`Historial recuperado con éxito de Firestore: ${messages.length} mensajes.`);
-    return messages;
+    if (messages.length > 0) {
+      if (!globalCache.messageCache) globalCache.messageCache = {};
+      globalCache.messageCache[chatId] = messages;
+      return messages;
+    }
   } catch (error: any) {
     addLog(`Error al recuperar mensajes de Firestore: ${error.message}`, 'error');
-    return [];
   }
+
+  return [];
+};
+
+export const syncRecentHistory = async (months = 2, minMessages = 50) => {
+  if (globalCache.syncStatus?.inProgress) {
+    return {
+      status: 'in_progress',
+      message: 'Sincronización en curso',
+      ...globalCache.syncStatus
+    };
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const twoMonthsAgoSec = nowSec - (months * 30 * 24 * 3600);
+
+  globalCache.syncStatus = {
+    inProgress: true,
+    progress: 0,
+    total: 0,
+    currentChat: 'Obteniendo lista de chats...',
+    lastSyncTime: null,
+    totalMessagesSynced: 0,
+    error: null,
+  };
+
+  addLog(`Iniciando sincronización masiva de los últimos ${months} meses (>= ${minMessages} msgs/contacto)...`);
+
+  try {
+    const chats = await getRecentChats(500);
+    const qualifying = chats.filter((c: any) => c.timestamp >= twoMonthsAgoSec);
+
+    globalCache.syncStatus.total = qualifying.length;
+    addLog(`Se encontraron ${qualifying.length} contactos con actividad en los últimos ${months} meses.`);
+
+    let totalMsgs = 0;
+    const syncedData: any[] = [];
+
+    for (let i = 0; i < qualifying.length; i++) {
+      const chat = qualifying[i];
+      globalCache.syncStatus.progress = i + 1;
+      globalCache.syncStatus.currentChat = chat.name || chat.phone || chat.id;
+
+      try {
+        const res = await axios.get(
+          `${baseURL}/sessions/${sessionId}/history?chatId=${encodeURIComponent(chat.id)}&limit=${minMessages}`,
+          { headers: getHeaders(), timeout: 10000 }
+        );
+
+        const msgs = Array.isArray(res.data) ? res.data : [];
+        if (!globalCache.messageCache) globalCache.messageCache = {};
+        globalCache.messageCache[chat.id] = msgs;
+        totalMsgs += msgs.length;
+
+        syncedData.push({
+          chatId: chat.id,
+          name: chat.name,
+          phone: chat.phone,
+          lastActivity: chat.timestamp,
+          messageCount: msgs.length,
+          messages: msgs
+        });
+
+        // Background write to Firestore (throttled/non-blocking)
+        msgs.forEach((m: any) => {
+          saveWhatsAppMessage(chat.id, m).catch(() => {});
+        });
+
+      } catch (chatErr: any) {
+        addLog(`Error al sincronizar chat ${chat.id}: ${chatErr.message}`, 'error');
+      }
+
+      // Small 15ms pause between chats to ensure smooth async I/O
+      await new Promise(r => setTimeout(r, 15));
+    }
+
+    globalCache.syncStatus.inProgress = false;
+    globalCache.syncStatus.lastSyncTime = Date.now();
+    globalCache.syncStatus.totalMessagesSynced = totalMsgs;
+    globalCache.syncStatus.currentChat = 'Completado';
+
+    addLog(`✅ Sincronización completada: ${qualifying.length} contactos y ${totalMsgs} mensajes descargados.`);
+
+    return {
+      success: true,
+      totalContacts: qualifying.length,
+      totalMessages: totalMsgs,
+      syncedAt: new Date().toISOString(),
+      contacts: syncedData.map(c => ({
+        chatId: c.chatId,
+        name: c.name,
+        phone: c.phone,
+        messageCount: c.messageCount
+      }))
+    };
+  } catch (error: any) {
+    globalCache.syncStatus.inProgress = false;
+    globalCache.syncStatus.error = error.message;
+    addLog(`❌ Error en sincronización masiva: ${error.message}`, 'error');
+    throw error;
+  }
+};
+
+export const getSyncStatus = () => {
+  return globalCache.syncStatus || { inProgress: false, progress: 0, total: 0 };
+};
+
+export const getAllSyncedData = () => {
+  const chats = globalCache.syncedChats || [];
+  return chats.map(c => ({
+    chatId: c.id,
+    name: c.name,
+    phone: c.phone,
+    timestamp: c.timestamp,
+    messages: globalCache.messageCache?.[c.id] || []
+  }));
 };
 
 export const getScreenshot = async () => {
   return null;
+};
+
+export const downloadMedia = async (messageId: string): Promise<{ data: string; mimetype: string }> => {
+  const res = await axios.get(`${baseURL}/sessions/${sessionId}/media/${encodeURIComponent(messageId)}`, {
+    headers: getHeaders(),
+    timeout: 30000,
+  });
+  return res.data;
+};
+
+export const chatIdentifier = (chatId: string) => {
+  if (!chatId) return '';
+  if (chatId.includes('@')) return chatId;
+  const digits = chatId.replace(/\D/g, '');
+  if (digits.length === 10 && !digits.startsWith('52')) {
+    return `521${digits}@c.us`;
+  }
+  return `${digits}@c.us`;
 };

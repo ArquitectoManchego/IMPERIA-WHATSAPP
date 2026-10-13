@@ -1,4 +1,5 @@
 import Sidebar from "@/components/Sidebar";
+import NewChatModal from "@/components/NewChatModal";
 
 export default function DashboardLayout({
   children,
@@ -11,6 +12,8 @@ export default function DashboardLayout({
       <main className="flex-1 relative overflow-hidden">
         {children}
       </main>
+      <NewChatModal />
     </div>
   );
 }
+

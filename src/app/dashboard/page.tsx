@@ -19,7 +19,11 @@ import {
   Sparkles,
   RefreshCw,
   X,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Download,
+  FileDown,
+  Zap,
+  Calendar
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -27,6 +31,9 @@ import { Button } from '@/components/ui/button';
 import { useSearchParams } from 'next/navigation';
 import { useToast } from '@/components/ui/use-toast';
 import { WhatsAppStatus } from '@/components/whatsapp/WhatsAppStatus';
+import CrmPanel from '@/components/CrmPanel';
+import QuickRepliesModal from '@/components/whatsapp/QuickRepliesModal';
+import AiAssistantModal from '@/components/whatsapp/AiAssistantModal';
 
 export default function DashboardPage() {
   const { toast } = useToast();
@@ -72,12 +79,20 @@ export default function DashboardPage() {
 
   const [messageText, setMessageText] = useState('');
   const [sending, setSending] = useState(false);
+  const sendingRef = React.useRef(false);
   const [messages, setMessages] = useState<any[]>([]);
   const [messageLimit, setMessageLimit] = useState(200);
   const [daysToLoad, setDaysToLoad] = useState(2);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [syncedPhones, setSyncedPhones] = useState<Set<string>>(new Set());
   const [attachment, setAttachment] = useState<string | null>(null);
+  const [isQuickRepliesOpen, setIsQuickRepliesOpen] = useState(false);
+  const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
+
+  // Bulk sync state
+  const [isSyncingHistory, setIsSyncingHistory] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<{ progress: number; total: number; currentChat: string }>({ progress: 0, total: 0, currentChat: '' });
+  const [syncCompletedStats, setSyncCompletedStats] = useState<{ totalContacts: number; totalMessages: number } | null>(null);
 
   // Debug Logs State
   const [systemLogs, setSystemLogs] = useState<string[]>([]);
@@ -168,14 +183,14 @@ export default function DashboardPage() {
         setLoadingMessages(false); // Reset this
         setLoading(true);
         
-        // 1. Fetch 20 Most Recent Chats from WhatsApp
-        const resChats = await fetch('/api/whatsapp/chats');
+        // 1. Fetch Recent Chats from WhatsApp (up to 200)
+        const resChats = await fetch('/api/whatsapp/chats?limit=200');
         const chatsData = await resChats.json();
         
         const formattedChats = Array.isArray(chatsData) ? chatsData.map((c: any) => ({
           id: c.id,
           name: c.name,
-          phone: c.id.split('@')[0],
+          phone: c.phone || c.id.split('@')[0],
           status: 'Reciente',
           type: 'WhatsApp'
         })) : [];
@@ -229,6 +244,8 @@ export default function DashboardPage() {
         }
 
         setClients(formattedChats);
+        // Automatically allow reading loaded chats
+        setSyncedPhones(new Set(formattedChats.map((c: any) => c.id)));
         
         if (!hasInitialized) {
           if (matched) {
@@ -262,20 +279,122 @@ export default function DashboardPage() {
   const handleChatSelect = (chat: any) => {
     console.log(`[UI] Selecting Chat: ${chat.name} (${chat.id})`);
     setSelectedChat(chat);
+    setSyncedPhones(prev => new Set(prev).add(chat.id));
+  };
+
+  const handleStartBulkSync = async () => {
+    setIsSyncingHistory(true);
+    setSyncCompletedStats(null);
+    setSyncProgress({ progress: 0, total: 0, currentChat: 'Iniciando escaneo...' });
+
+    const progressPoll = setInterval(async () => {
+      try {
+        const res = await fetch('/api/whatsapp/sync-history');
+        const data = await res.json();
+        if (data && typeof data.progress === 'number') {
+          setSyncProgress({ progress: data.progress, total: data.total || 0, currentChat: data.currentChat || '' });
+          if (!data.inProgress && data.total > 0) {
+            clearInterval(progressPoll);
+          }
+        }
+      } catch {}
+    }, 1000);
+
+    try {
+      const res = await fetch('/api/whatsapp/sync-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ months: 2, minMessages: 50 })
+      });
+      const result = await res.json();
+      clearInterval(progressPoll);
+
+      if (result.success) {
+        setSyncCompletedStats({
+          totalContacts: result.totalContacts,
+          totalMessages: result.totalMessages
+        });
+        toast({
+          title: "Sincronización Completada",
+          description: `Se descargaron ${result.totalMessages} mensajes de ${result.totalContacts} contactos de los últimos 2 meses.`
+        });
+        
+        // Refresh chat list
+        const resChats = await fetch('/api/whatsapp/chats?limit=200');
+        const freshChats = await resChats.json();
+        if (Array.isArray(freshChats)) {
+          const formatted = freshChats.map((c: any) => ({
+            id: c.id,
+            name: c.name,
+            phone: c.phone || c.id.split('@')[0],
+            status: 'Reciente',
+            type: 'WhatsApp'
+          }));
+          setClients(formatted);
+          setSyncedPhones(new Set(formatted.map(c => c.id)));
+        }
+
+        if (selectedChat) {
+          fetchMessages();
+        }
+      } else {
+        throw new Error(result.error || 'Error en sincronización');
+      }
+    } catch (err: any) {
+      clearInterval(progressPoll);
+      toast({
+        title: "Error en Descarga de Historial",
+        description: err.message || "No se pudo completar la sincronización",
+        variant: "destructive"
+      });
+    } finally {
+      setIsSyncingHistory(false);
+    }
+  };
+
+  const handleExportHistory = () => {
+    window.open('/api/whatsapp/sync-history?export=true', '_blank');
   };
 
   const handleSendMessage = async () => {
-    if (!selectedChat || (!messageText.trim() && !attachment) || sending) return;
+    if (sendingRef.current || sending || !selectedChat) return;
+    const textToSend = messageText.trim();
+    const mediaToSend = attachment;
+    if (!textToSend && !mediaToSend) return;
 
+    sendingRef.current = true;
     setSending(true);
+
+    // Immediately clear input fields so user cannot double-submit
+    setMessageText('');
+    setAttachment(null);
+
+    // Optimistic update
+    const tempId = `temp_${Date.now()}`;
+    const optimisticMsg = {
+      id: tempId,
+      body: textToSend,
+      mediaUrl: mediaToSend || undefined,
+      fromMe: true,
+      timestamp: Math.floor(Date.now() / 1000),
+      hasMedia: !!mediaToSend,
+      type: mediaToSend ? 'image' : 'chat'
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+
     try {
+      const targetId = (selectedChat.id && selectedChat.id.includes('@'))
+        ? selectedChat.id
+        : (selectedChat.phone || selectedChat.id);
+
       const response = await fetch('/api/whatsapp/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          chatId: selectedChat.id,
-          message: messageText,
-          mediaBase64: attachment
+          chatId: targetId,
+          phone: selectedChat.phone,
+          message: textToSend,
+          mediaBase64: mediaToSend
         })
       });
 
@@ -283,21 +402,14 @@ export default function DashboardPage() {
 
       if (result.success) {
         toast({
-          title: attachment ? "Imagen Enviada" : "Mensaje Enviado",
-          description: `Enviado a ${selectedChat.name || selectedChat.phone}`,
+          title: mediaToSend ? "Imagen Enviada" : "Mensaje Enviado",
+          description: `Enviado a ${selectedChat.name || selectedChat.phone || targetId}`,
         });
         
-        // Optimistic update
-        const newMessage = {
-          id: result.messageId,
-          body: messageText,
-          fromMe: true,
-          timestamp: Math.floor(Date.now() / 1000),
-          hasMedia: !!attachment
-        };
-        setMessages(prev => [...prev, newMessage]);
-        setMessageText('');
-        setAttachment(null);
+        // Update optimistic message with real ID
+        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: result.messageId || m.id } : m));
+        // Immediately fetch fresh messages
+        setTimeout(() => fetchMessages(true), 500);
       } else {
         throw new Error(result.error || 'Error al enviar');
       }
@@ -307,8 +419,11 @@ export default function DashboardPage() {
         description: err.message || "No se pudo enviar el mensaje.",
         variant: "destructive"
       });
+      // Rollback optimistic message if send failed
+      setMessages(prev => prev.filter(m => m.id !== tempId));
     } finally {
       setSending(false);
+      sendingRef.current = false;
     }
   };
 
@@ -339,20 +454,43 @@ export default function DashboardPage() {
             <div className="flex items-center gap-4">
               <h2 className="text-2xl font-black text-white tracking-tight">Mensajes</h2>
               <WhatsAppStatus />
-            </div>            <div className="flex gap-2">
+            </div>            <div className="flex gap-1.5 items-center">
+              <Button 
+                size="sm"
+                variant="outline"
+                title="Descargar historial de los últimos 2 meses (50 mensajes por contacto)"
+                onClick={handleStartBulkSync}
+                disabled={isSyncingHistory}
+                className="gap-1.5 bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-[11px] font-bold rounded-xl h-9 px-2.5"
+              >
+                {isSyncingHistory ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>{syncProgress.progress}/{syncProgress.total || '...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Descargar 2m</span>
+                  </>
+                )}
+              </Button>
+              <Button 
+                size="icon" 
+                variant="ghost" 
+                title="Exportar Historial Completo a JSON"
+                onClick={handleExportHistory}
+                className="rounded-xl hover:bg-white/5 text-slate-400 h-9 w-9"
+              >
+                <FileDown className="w-4 h-4" />
+              </Button>
               <Button 
                 size="icon" 
                 variant="ghost" 
                 onClick={() => setShowDebug(!showDebug)}
-                className={cn("rounded-xl transition-all", showDebug ? "bg-emerald-500/20 text-emerald-500" : "hover:bg-white/5 text-slate-400")}
+                className={cn("rounded-xl transition-all h-9 w-9", showDebug ? "bg-emerald-500/20 text-emerald-500" : "hover:bg-white/5 text-slate-400")}
               >
-                <Sparkles className="w-5 h-5" />
-              </Button>
-              <Button size="icon" variant="ghost" className="rounded-xl hover:bg-white/5 text-slate-400">
-                <Filter className="w-5 h-5" />
-              </Button>
-              <Button size="icon" variant="ghost" className="rounded-xl hover:bg-white/5 text-slate-400">
-                <MoreVertical className="w-5 h-5" />
+                <Sparkles className="w-4 h-4" />
               </Button>
             </div>
           </div>
@@ -367,6 +505,37 @@ export default function DashboardPage() {
               className="w-full h-12 bg-white/5 border border-white/5 rounded-2xl pl-12 pr-4 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500/50 transition-all font-medium"
             />
           </div>
+
+          {/* Progress Bar for Bulk Sync */}
+          {isSyncingHistory && (
+            <div className="mt-3 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl space-y-2">
+              <div className="flex justify-between items-center text-[10px] font-bold text-emerald-400">
+                <span className="truncate max-w-[200px]">Descargando: {syncProgress.currentChat || 'Iniciando...'}</span>
+                <span>{syncProgress.total ? Math.round((syncProgress.progress / syncProgress.total) * 100) : 0}%</span>
+              </div>
+              <div className="w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
+                <div 
+                  className="bg-emerald-500 h-full transition-all duration-300"
+                  style={{ width: `${syncProgress.total ? (syncProgress.progress / syncProgress.total) * 100 : 5}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Sync Completed Notification Badge */}
+          {syncCompletedStats && !isSyncingHistory && (
+            <div className="mt-3 p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-between text-[11px] text-emerald-400">
+              <span className="font-semibold">
+                ✅ {syncCompletedStats.totalContacts} contactos ({syncCompletedStats.totalMessages} msgs)
+              </span>
+              <button 
+                onClick={() => setSyncCompletedStats(null)}
+                className="text-slate-400 hover:text-white p-0.5"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </header>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar px-3 space-y-1">
@@ -414,10 +583,10 @@ export default function DashboardPage() {
                 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-0.5">
-                    <h3 className="font-bold text-white truncate text-sm">{chat.name || 'Sin Nombre'}</h3>
+                    <h3 className="font-bold text-white truncate text-sm blur-sensitive">{chat.name || 'Sin Nombre'}</h3>
                     <span className="text-[9px] font-black text-slate-500 uppercase tracking-tighter shrink-0">{chat.status}</span>
                   </div>
-                  <p className="text-[11px] text-slate-500 truncate leading-tight font-medium">
+                  <p className="text-[11px] text-slate-500 truncate leading-tight font-medium blur-sensitive">
                     {chat.phone}
                   </p>
                 </div>
@@ -445,9 +614,9 @@ export default function DashboardPage() {
                   )}
                 </div>
                 <div>
-                  <h3 className="font-bold text-white tracking-tight">{selectedChat.name || 'Selecciona un chat'}</h3>
+                  <h3 className="font-bold text-white tracking-tight blur-sensitive">{selectedChat.name || 'Selecciona un chat'}</h3>
                   <div className="flex items-center gap-2">
-                    <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">
+                    <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest blur-sensitive">
                       ID: {selectedChat.id}
                     </p>
                     {selectedChat.id.includes('@g.us') && (
@@ -458,7 +627,17 @@ export default function DashboardPage() {
               </div>
               
               <div className="flex items-center gap-3">
-                 <Button size="icon" variant="ghost" className="rounded-xl hover:bg-white/5 text-slate-400">
+                  <a
+                    href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(`Cita con ${selectedChat.name || selectedChat.id}`)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Agendar en Google Calendar"
+                  >
+                    <Button size="icon" variant="ghost" className="rounded-xl hover:bg-white/5 text-slate-400 hover:text-emerald-400">
+                      <Calendar className="w-5 h-5" />
+                    </Button>
+                  </a>
+                  <Button size="icon" variant="ghost" className="rounded-xl hover:bg-white/5 text-slate-400">
                     <Video className="w-5 h-5" />
                   </Button>
                   <Button size="icon" variant="ghost" className="rounded-xl hover:bg-white/5 text-slate-400">
@@ -551,7 +730,17 @@ export default function DashboardPage() {
                               ? 'bg-emerald-500 text-white rounded-tr-none shadow-emerald-900/20' 
                               : 'bg-white/5 text-slate-200 border border-white/5 rounded-tl-none shadow-black/20'
                           }`}>
-                            {msg.body}
+                            {msg.mediaUrl ? (
+                              <div className="mb-2 rounded-xl overflow-hidden max-h-60 border border-white/10 shadow-md">
+                                <img src={msg.mediaUrl} alt="Adjunto" className="w-full h-full object-cover" />
+                              </div>
+                            ) : msg.hasMedia && msg.type === 'image' && !msg.body ? (
+                              <div className="flex items-center gap-2 mb-1 text-xs opacity-80">
+                                <ImageIcon className="w-4 h-4" />
+                                <span>Imagen</span>
+                              </div>
+                            ) : null}
+                            {msg.body && <div className="blur-sensitive whitespace-pre-wrap">{msg.body}</div>}
                             <div className={`text-[9px] mt-2 opacity-50 ${msg.fromMe ? 'text-right' : 'text-left'} font-bold`}>
                                {msg.timestamp ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                             </div>
@@ -566,8 +755,23 @@ export default function DashboardPage() {
 
             <footer className="p-8 glass z-10 border-t border-white/5">
               <div className="flex items-center gap-4">
-                <Button size="icon" variant="ghost" className="rounded-xl text-slate-400 hover:text-white">
-                  <Smile className="w-6 h-6" />
+                <Button 
+                  size="icon" 
+                  variant="ghost" 
+                  onClick={() => setIsQuickRepliesOpen(true)}
+                  title="Respuestas Rápidas (Plantillas)"
+                  className="rounded-xl text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
+                >
+                  <Zap className="w-5 h-5" />
+                </Button>
+                <Button 
+                  size="icon" 
+                  variant="ghost" 
+                  onClick={() => setIsAiAssistantOpen(true)}
+                  title="Asistente de Redacción Comercial IA"
+                  className="rounded-xl text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                >
+                  <Sparkles className="w-5 h-5" />
                 </Button>
                 <Button size="icon" variant="ghost" className="rounded-xl text-slate-400 hover:text-white">
                   <Paperclip className="w-6 h-6" />
@@ -589,14 +793,22 @@ export default function DashboardPage() {
                     placeholder={attachment ? "Añadir un comentario..." : "Escribe un mensaje..."}
                     value={messageText}
                     onChange={(e) => setMessageText(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                    onKeyDown={(e) => { 
+                      if (e.key === 'Enter' && !e.shiftKey) { 
+                        e.preventDefault(); 
+                        e.stopPropagation(); 
+                        if (messageText.trim() || attachment) {
+                          handleSendMessage(); 
+                        }
+                      } 
+                    }}
                     onPaste={handlePaste}
                     className="w-full h-14 bg-white/5 border border-white/5 rounded-2xl px-6 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all font-medium"
                   />
                 </div>
                 <Button 
                   onClick={handleSendMessage}
-                  disabled={sending || !messageText.trim()}
+                  disabled={sending || (!messageText.trim() && !attachment)}
                   className="w-14 h-14 bg-emerald-500 hover:bg-emerald-400 text-white rounded-2xl shadow-lg shadow-emerald-900/40 transition-all active:scale-95 shrink-0"
                 >
                   {sending ? <Loader2 className="w-6 h-6 animate-spin" /> : <Send className="w-6 h-6" />}
@@ -618,52 +830,26 @@ export default function DashboardPage() {
       </section>
 
       {/* 3. CRM Context Column */}
-      <section className="w-80 border-l border-white/5 glass p-8 space-y-10 flex flex-col backdrop-blur-3xl overflow-y-auto">
+      <section className="w-80 border-l border-white/5 glass flex flex-col backdrop-blur-3xl overflow-y-auto">
         {selectedChat ? (
-          <>
-            <div className="flex flex-col items-center">
-              <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-emerald-500/20 to-blue-500/20 flex items-center justify-center border border-white/10 mb-6 group relative overflow-hidden">
+          <div className="p-4 flex flex-col h-full">
+            <div className="flex flex-col items-center pb-4 border-b border-white/5 mb-4">
+              <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-emerald-500/20 to-blue-500/20 flex items-center justify-center border border-white/10 mb-3 group relative overflow-hidden">
                 <div className="absolute inset-0 bg-white/10 rounded-3xl blur opacity-0 group-hover:opacity-100 transition duration-500" />
                 {selectedChat.avatar ? (
                   <img src={selectedChat.avatar} alt={selectedChat.name} className="w-full h-full object-cover" />
                 ) : (
-                  <User className="w-10 h-10 text-white" />
+                  <User className="w-8 h-8 text-white" />
                 )}
               </div>
-              <h3 className="text-xl font-black text-white tracking-tight mb-1 text-center">{selectedChat.name || 'Sin Nombre'}</h3>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em]">Cliente Registrado</p>
+              <h3 className="text-base font-black text-white tracking-tight mb-0.5 text-center">{selectedChat.name || 'Sin Nombre'}</h3>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em]">{selectedChat.phone || selectedChat.id}</p>
             </div>
 
-            <div className="space-y-6">
-              <header className="flex items-center justify-between">
-                <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Atributos CRM</h4>
-                <div className="px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-lg text-[10px] font-black text-blue-400 uppercase">
-                  {selectedChat.status || 'Active'}
-                </div>
-              </header>
-              
-              <div className="grid grid-cols-1 gap-3">
-                 <div className="p-4 bg-white/5 rounded-2xl border border-white/5 space-y-2">
-                    <div className="flex items-center gap-2 text-slate-400">
-                      <Tag className="w-4 h-4" />
-                      <span className="text-[10px] font-bold uppercase tracking-wider">Detalles</span>
-                    </div>
-                    <p className="text-xs text-slate-300 font-medium">{selectedChat.phone}</p>
-                    <p className="text-[10px] text-slate-500 leading-relaxed italic">
-                      Sincronizado desde base de datos compartida.
-                    </p>
-                 </div>
-              </div>
-            </div>
-
-            <div className="mt-auto pt-10">
-               <Button className="w-full h-14 bg-transparent hover:bg-white/5 text-white/50 hover:text-white border border-white/5 transition-all rounded-2xl text-[10px] font-black uppercase tracking-widest">
-                Ajustes del Chat
-               </Button>
-            </div>
-          </>
+            <CrmPanel phone={selectedChat.phone || selectedChat.id} />
+          </div>
         ) : (
-          <div className="flex flex-col items-center justify-center h-full opacity-20 text-center">
+          <div className="flex flex-col items-center justify-center h-full opacity-20 text-center p-8">
              <Clock className="w-8 h-8 mb-4" />
              <p className="text-[9px] font-black uppercase tracking-widest leading-loose">
                Esperando Selección de Cliente
@@ -760,6 +946,28 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* Quick Replies & AI Assistant Modals */}
+      <QuickRepliesModal
+        isOpen={isQuickRepliesOpen}
+        onClose={() => setIsQuickRepliesOpen(false)}
+        onSelect={(text, sendImmediately) => {
+          if (sendImmediately) {
+            setMessageText(text);
+            setTimeout(() => handleSendMessage(), 50);
+          } else {
+            setMessageText(prev => prev ? `${prev} ${text}` : text);
+          }
+        }}
+      />
+
+      <AiAssistantModal
+        isOpen={isAiAssistantOpen}
+        onClose={() => setIsAiAssistantOpen(false)}
+        currentDraft={messageText}
+        contactName={selectedChat?.name}
+        onApply={(improved) => setMessageText(improved)}
+      />
     </div>
   );
 }

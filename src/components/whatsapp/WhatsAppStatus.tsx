@@ -21,7 +21,7 @@ export function WhatsAppStatus() {
 
   const fetchStatus = async (restart = false) => {
     try {
-      const res = await fetch(`/api/whatsapp/status${restart ? '?restart=true' : ''}`);
+      const res = await fetch('/api/whatsapp/status', restart ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({restart:true})} : undefined);
       const data = await res.json();
       setStatus(data);
     } catch (err) {
@@ -59,7 +59,7 @@ export function WhatsAppStatus() {
         {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 
          status?.isReady ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
         <span className="text-[10px] font-black uppercase tracking-widest">
-          {status?.isReady ? 'Conectado' : 'Desconectado'}
+          {status?.isReady ? (status?.mode === 'remote' ? 'Remoto OK' : 'Conectado') : 'Desconectado'}
         </span>
       </Button>
 
@@ -71,7 +71,12 @@ export function WhatsAppStatus() {
               <div className="flex items-center justify-between mb-8">
                 <div className="flex items-center gap-2">
                   <QrCode className="w-6 h-6 text-emerald-500" />
-                  <h3 className="text-xl font-black text-white tracking-tight">WhatsApp Status</h3>
+                  <div>
+                    <h3 className="text-xl font-black text-white tracking-tight">WhatsApp Status</h3>
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
+                      {status?.mode === 'direct' ? '• Modo Directo (Local)' : status?.mode === 'remote' ? '• Modo Sincronizado (Remoto)' : '• Sin Conexión'}
+                    </span>
+                  </div>
                 </div>
                 <Button variant="ghost" size="icon" onClick={toggleModal} className="rounded-xl hover:bg-white/5 text-slate-500">
                   <X className="w-5 h-5" />
@@ -85,9 +90,13 @@ export function WhatsAppStatus() {
                       <CheckCircle2 className="w-10 h-10 text-emerald-500" />
                     </div>
                     <div>
-                      <h4 className="text-lg font-bold text-emerald-400">¡Conexión Exitosa!</h4>
-                      <p className="text-sm text-slate-400 mt-2">
-                        El motor de Imperia está vinculado y listo para enviar mensajes.
+                      <h4 className="text-lg font-bold text-emerald-400">
+                        {status.mode === 'remote' ? '¡Conectado Vía Nube!' : '¡Conexión Local Activa!'}
+                      </h4>
+                      <p className="text-sm text-slate-400 mt-2 leading-relaxed">
+                        {status.mode === 'remote'
+                          ? 'El motor de WhatsApp en tu equipo local está reportando actividad activa a Firestore. Puedes gestionar el CRM desde Vercel.'
+                          : 'El motor de Imperia está vinculado directamente y listo para enviar y recibir mensajes.'}
                       </p>
                     </div>
                   </div>
@@ -109,9 +118,14 @@ export function WhatsAppStatus() {
                       <XCircle className="w-8 h-8 text-red-500" />
                     </div>
                     <div>
-                      <h4 className="text-md font-bold text-red-400">Error en el Motor</h4>
-                      <p className="text-xs text-slate-500 mt-2 px-4 leading-relaxed">
+                      <h4 className="text-md font-bold text-red-400">
+                        {status?.mode === 'disconnected' ? 'Servicio Desconectado' : 'Aviso del Motor'}
+                      </h4>
+                      <p className="text-xs text-slate-400 mt-2 px-4 leading-relaxed">
                         {status.lastError}
+                      </p>
+                      <p className="text-[10px] text-slate-500 mt-3 px-4">
+                        Si estás en Vercel, enciende tu PC e inicia WhatsApp desde el Launcher local para conectar la sesión física.
                       </p>
                     </div>
                   </div>
