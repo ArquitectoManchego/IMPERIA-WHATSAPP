@@ -46,3 +46,4 @@ debug-db.mjs
 *.key
 secrets.json
 credential*.json
+.env*
