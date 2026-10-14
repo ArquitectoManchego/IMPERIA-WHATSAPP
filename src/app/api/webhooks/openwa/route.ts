@@ -8,7 +8,9 @@ export async function POST(req: NextRequest) {
   try {
     const { event, data } = JSON.parse(raw);
     if (event !== 'message.received') return NextResponse.json({ ignored: true });
-    if (!data?.id || !data?.from || !Number.isFinite(Number(data.timestamp))) return NextResponse.json({ error: 'Mensaje inválido' }, { status: 400 });
+    if (!data?.id || !data?.from) return NextResponse.json({ error: 'Mensaje inválido' }, { status: 400 });
+    const parsedTs = data.timestamp ? (typeof data.timestamp === 'number' ? data.timestamp : Math.floor(new Date(data.timestamp).getTime() / 1000)) : Math.floor(Date.now() / 1000);
+    data.timestamp = Number.isFinite(parsedTs) ? parsedTs : Math.floor(Date.now() / 1000);
     if (data.isGroup || /@(g\.us|broadcast|newsletter)$/.test(data.from)) return NextResponse.json({ ignored: true });
     // LID is a WhatsApp identity, never a phone. Gateway supplies resolved phone when possible.
     const identity = data.fromMe ? data.to : data.from;

@@ -56,11 +56,11 @@ const getHeaders = () => ({
   'X-API-Key': apiKey,
 });
 
-const registerWebhookIfNeeded = async () => {
-  const webhookUrl = `http://localhost:3010/api/webhooks/openwa`;
+const registerWebhookIfNeeded = async (targetSessionId: string = sessionId) => {
+  const webhookUrl = process.env.OPENWA_WEBHOOK_URL || 'http://127.0.0.1:3010/api/webhooks/openwa';
   try {
-    addLog(`Verificando webhooks registrados para la sesión '${sessionId}'...`);
-    const res = await axios.get(`${baseURL}/sessions/${sessionId}/webhooks`, {
+    addLog(`Verificando webhooks registrados para la sesión '${targetSessionId}'...`);
+    const res = await axios.get(`${baseURL}/sessions/${targetSessionId}/webhooks`, {
       headers: getHeaders(),
       timeout: 5000
     });
@@ -70,7 +70,7 @@ const registerWebhookIfNeeded = async () => {
 
     if (!exists) {
       addLog(`Webhook '${webhookUrl}' no registrado. Registrándolo ahora...`);
-      await axios.post(`${baseURL}/sessions/${sessionId}/webhooks`, {
+      await axios.post(`${baseURL}/sessions/${targetSessionId}/webhooks`, {
         url: webhookUrl,
         events: ['message.received', 'session.status'],
         secret: process.env.WEBHOOK_SECRET || '7f5e3e2b9c5a4d1e8c0b2d4e6f8a9b7c',
@@ -184,7 +184,8 @@ const checkAndUpdateStatus = async () => {
     }
     
     if (isConnected && !globalForWhatsApp.webhookRegistered) {
-      registerWebhookIfNeeded().then(() => {
+      const targetId = session?.id || sessionId;
+      registerWebhookIfNeeded(targetId).then(() => {
         globalForWhatsApp.webhookRegistered = true;
       }).catch(() => {});
     }
