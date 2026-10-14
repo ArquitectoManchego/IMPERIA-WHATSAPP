@@ -8,7 +8,12 @@ export async function POST(req: NextRequest) {
   try {
     const { event, data } = JSON.parse(raw);
     if (event !== 'message.received') return NextResponse.json({ ignored: true });
-    if (!data?.id || !data?.from) return NextResponse.json({ error: 'Mensaje inválido' }, { status: 400 });
+    const messageSender = data?.from || data?.chatId || data?.to;
+    if (!data?.id || !messageSender) {
+      console.warn('[Webhook] Mensaje sin remitente o id identificable:', JSON.stringify(data));
+      return NextResponse.json({ error: 'Mensaje inválido' }, { status: 400 });
+    }
+    if (!data.from) data.from = messageSender;
     const parsedTs = data.timestamp ? (typeof data.timestamp === 'number' ? data.timestamp : Math.floor(new Date(data.timestamp).getTime() / 1000)) : Math.floor(Date.now() / 1000);
     data.timestamp = Number.isFinite(parsedTs) ? parsedTs : Math.floor(Date.now() / 1000);
     if (data.isGroup || /@(g\.us|broadcast|newsletter)$/.test(data.from)) return NextResponse.json({ ignored: true });

@@ -456,15 +456,23 @@ export const getRecentChats = async (limit = 200) => {
 
     const chats = res.data;
     if (Array.isArray(chats)) {
-      const mapped = chats.slice(0, limit).map((c: any) => ({
-        id: c.id || c.chatId || c.jid,
-        name: c.name || c.pushname || c.id?.split('@')[0] || 'Sin Nombre',
-        phone: c.phone || (c.id?.endsWith('@c.us') ? c.id.split('@')[0] : c.id?.split('@')[0]),
-        timestamp: c.timestamp || Math.floor(Date.now() / 1000),
-        unreadCount: c.unreadCount || 0,
-        lastMessage: c.lastMessage?.body || c.lastMessage || '',
-        avatar: c.avatar || ''
-      }));
+      const mapped = chats.slice(0, limit).map((c: any) => {
+        const nameIsPhone = typeof c.name === 'string' && /^\+?[0-9\s-]{8,}$/.test(c.name);
+        const resolvedPhone = (nameIsPhone ? c.name : null) || 
+          (c.phone && !c.phone.includes('@') && !c.id?.endsWith('@lid') ? c.phone : null) || 
+          (c.id?.endsWith('@c.us') ? c.id.split('@')[0] : (c.id?.endsWith('@lid') ? (nameIsPhone ? c.name : '') : c.id?.split('@')[0]));
+        const displayName = c.name || c.pushname || resolvedPhone || 'Sin Nombre';
+
+        return {
+          id: c.id || c.chatId || c.jid,
+          name: displayName,
+          phone: resolvedPhone || '',
+          timestamp: c.timestamp || Math.floor(Date.now() / 1000),
+          unreadCount: c.unreadCount || 0,
+          lastMessage: c.lastMessage?.body || c.lastMessage || '',
+          avatar: c.avatar || ''
+        };
+      });
       globalCache.syncedChats = mapped;
       return mapped;
     }

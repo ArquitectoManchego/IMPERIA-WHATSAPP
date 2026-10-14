@@ -11,9 +11,72 @@ function withTimeout<T>(promise: Promise<T>, ms = 1500): Promise<T> {
   ]);
 }
 
+let cachedContacts: any[] | null = null;
+let lastContactsCacheTime = 0;
+const CONTACTS_CACHE_TTL = 30000; // 30s in-memory cache to prevent quota exhaustion
+
+export function invalidateContactsCache() {
+  cachedContacts = null;
+  lastContactsCacheTime = 0;
+}
+
+export function getLocalFallbackContacts(): any[] {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const rawPath = path.resolve(process.cwd(), 'src/data/clients_raw.json');
+    if (!fs.existsSync(rawPath)) return [];
+    const raw = JSON.parse(fs.readFileSync(rawPath, 'utf8'));
+    const map = new Map<string, any>();
+    for (const row of raw) {
+      if (!row.telefono) continue;
+      let normalized: string;
+      try {
+        normalized = phoneNumber(String(row.telefono));
+      } catch {
+        continue;
+      }
+      const id = stableId(normalized);
+      if (!map.has(id)) {
+        map.set(id, {
+          id,
+          nombre: row.nombre || normalized,
+          telefono: normalized,
+          status: 'cliente',
+          source: 'taylor',
+          nameConfirmed: !!row.nombre,
+          notificationsConsent: false,
+          googleSyncStatus: 'synced',
+          createdAt: row.createdAt?.seconds ? new Date(row.createdAt.seconds * 1000).toISOString() : new Date().toISOString(),
+          updatedAt: row.updatedAt?.seconds ? new Date(row.updatedAt.seconds * 1000).toISOString() : new Date().toISOString()
+        });
+      } else {
+        const existing = map.get(id);
+        if (!existing.nameConfirmed && row.nombre) {
+          existing.nombre = row.nombre;
+          existing.nameConfirmed = true;
+        }
+      }
+    }
+    return Array.from(map.values());
+  } catch (e) {
+    return [];
+  }
+}
+
 export async function ensureContact(phone: string, name?: string, source = 'whatsapp') {
   const normalized = phoneNumber(phone);
   const ref = contactsRef().doc(stableId(normalized));
+
+  // If name is not provided or matches raw phone, look up from local Taylor dataset
+  if (!name || name === normalized) {
+    try {
+      const local = getLocalFallbackContacts();
+      const match = local.find(c => c.telefono === normalized);
+      if (match?.nombre) name = match.nombre;
+    } catch (_) {}
+  }
+
   try {
     await withTimeout(database().runTransaction(async tx => {
       const old = await tx.get(ref);
@@ -50,6 +113,11 @@ export async function ensureContact(phone: string, name?: string, source = 'what
 }
 
 export async function listContacts() {
+  const now = Date.now();
+  if (cachedContacts && (now - lastContactsCacheTime) < CONTACTS_CACHE_TTL) {
+    return cachedContacts;
+  }
+
   let contacts: any[] = [];
   try {
     const snapshot = await withTimeout(contactsRef().orderBy('updatedAt', 'desc').limit(1000).get());
@@ -58,10 +126,24 @@ export async function listContacts() {
     contacts = [];
   }
 
+  // If Firestore is empty, timed out, or quota exceeded, fall back to local dataset
+  if (contacts.length === 0) {
+    contacts = getLocalFallbackContacts();
+  } else {
+    // Merge any missing Taylor contacts that aren't yet in Firestore
+    const firestorePhones = new Set(contacts.map(c => c.telefono));
+    const local = getLocalFallbackContacts();
+    for (const loc of local) {
+      if (!firestorePhones.has(loc.telefono)) {
+        contacts.push(loc);
+      }
+    }
+  }
+
   // Enrich with local metadata (stages, tags, deals)
   try {
     const metadata = await getMetadataState();
-    return contacts.map(c => {
+    const enriched = contacts.map(c => {
       const stage = metadata.contactStages[c.id] || (c.status === 'cliente' ? 'cliente' : 'nuevo');
       const tags = metadata.contactTags[c.id] || (c.tags || []);
       const contactDeals = metadata.deals.filter(d => d.contactId === c.id);
@@ -74,7 +156,12 @@ export async function listContacts() {
         dealsTotal,
       };
     });
+    cachedContacts = enriched;
+    lastContactsCacheTime = now;
+    return enriched;
   } catch (_) {
+    cachedContacts = contacts;
+    lastContactsCacheTime = now;
     return contacts;
   }
 }
@@ -291,6 +378,7 @@ export async function updateContactStage(phone: string, stageId: string) {
     ...state,
     contactStages: { ...state.contactStages, [person.id]: stageId }
   }));
+  invalidateContactsCache();
 }
 
 export async function updateContactTags(phone: string, tags: string[]) {
@@ -299,6 +387,7 @@ export async function updateContactTags(phone: string, tags: string[]) {
     ...state,
     contactTags: { ...state.contactTags, [person.id]: tags }
   }));
+  invalidateContactsCache();
 }
 
 export async function listDeals(): Promise<OpportunityDeal[]> {
@@ -317,6 +406,7 @@ export async function addDeal(deal: Omit<OpportunityDeal, 'id' | 'createdAt' | '
     ...state,
     deals: [newDeal, ...state.deals]
   }));
+  invalidateContactsCache();
   return newDeal;
 }
 
@@ -332,6 +422,7 @@ export async function updateDeal(dealId: string, patch: Partial<OpportunityDeal>
     });
     return { ...state, deals };
   });
+  invalidateContactsCache();
   return updatedDeal;
 }
 
@@ -340,6 +431,7 @@ export async function deleteDeal(dealId: string): Promise<boolean> {
     ...state,
     deals: state.deals.filter(d => d.id !== dealId)
   }));
+  invalidateContactsCache();
   return true;
 }
 

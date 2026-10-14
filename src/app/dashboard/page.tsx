@@ -54,32 +54,14 @@ export default function DashboardPage() {
 
 
   const filteredClients = React.useMemo(() => {
-    const search = searchTerm.toLowerCase();
+    const search = searchTerm.toLowerCase().trim();
     if (!search) return clients;
 
-    // Filter active chats
-    const activeMatches = clients.filter(c => 
+    return clients.filter(c => 
       (c.name || '').toLowerCase().includes(search) ||
       (c.phone || '').includes(search)
     );
-
-    // Filter global contacts that aren't in active chats
-    const globalMatches = allContacts
-      .filter(c => 
-        !clients.some(ac => ac.phone === c.telefono) && 
-        ((c.nombre || '').toLowerCase().includes(search) || (c.telefono || '').includes(search))
-      )
-      .map(c => ({
-        id: c.id,
-        name: c.nombre,
-        phone: c.telefono,
-        status: 'Disponible',
-        type: c.source === 'google' ? 'Google' : 'Taylor',
-        isGlobal: true
-      }));
-
-    return [...activeMatches, ...globalMatches];
-  }, [searchTerm, clients, allContacts]);
+  }, [searchTerm, clients]);
 
   const [messageText, setMessageText] = useState('');
   const [sending, setSending] = useState(false);
@@ -185,87 +167,93 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        setLoadingMessages(false); // Reset this
+        setLoadingMessages(false);
         setLoading(true);
         
-        // 1. Fetch Recent Chats from WhatsApp (up to 200)
-        const resChats = await fetch('/api/whatsapp/chats?limit=200');
-        const chatsData = await resChats.json();
-        
-        const formattedChats = Array.isArray(chatsData) ? chatsData.map((c: any) => ({
+        // 1. Fetch WhatsApp chats and CRM clients in parallel
+        const [resChatsSettled, resClientsSettled] = await Promise.allSettled([
+          fetch('/api/whatsapp/chats?limit=200').then(r => r.ok ? r.json() : []),
+          fetch('/api/clients').then(r => r.ok ? r.json() : [])
+        ]);
+
+        const chatsData = resChatsSettled.status === 'fulfilled' && Array.isArray(resChatsSettled.value) 
+          ? resChatsSettled.value 
+          : [];
+        const clientsData = resClientsSettled.status === 'fulfilled' && Array.isArray(resClientsSettled.value) 
+          ? resClientsSettled.value 
+          : [];
+
+        // Format active WhatsApp chats
+        const formattedChats = chatsData.map((c: any) => ({
           id: c.id,
-          name: c.name,
-          phone: c.phone || c.id.split('@')[0],
+          name: c.name || 'Sin Nombre',
+          phone: c.phone || (c.id?.endsWith?.('@c.us') ? c.id.split('@')[0] : c.id),
           status: 'Reciente',
-          type: 'WhatsApp'
-        })) : [];
+          type: 'WhatsApp',
+          lastMessage: c.lastMessage || '',
+          timestamp: c.timestamp
+        }));
 
-        // 2. Fetch Taylor + Google for global search
-        let globalData: any[] = [];
-        try {
-          const resGlobal = await fetch('/api/sync/contacts');
-          const gData = await resGlobal.json();
-          if (Array.isArray(gData)) {
-            globalData = gData;
-          }
-        } catch (e) {
-          console.error("Global search fetch failed:", e);
-        }
+        // Format CRM / Taylor contacts
+        const formattedCrmClients = clientsData.map((c: any) => {
+          const rawPhone = (c.telefono || c.phone || '').replace(/\D/g, '');
+          const id = c.id?.endsWith?.('@c.us') ? c.id : (rawPhone ? `${rawPhone}@c.us` : c.id);
+          return {
+            id,
+            contactId: c.id,
+            name: c.nombre || c.name || 'Sin Nombre',
+            phone: c.telefono || c.phone || '',
+            status: c.status === 'cliente' ? 'Cliente' : 'Disponible',
+            type: c.source === 'google' ? 'Google' : 'Taylor',
+            isGlobal: true,
+            stage: c.stage,
+            tags: c.tags || []
+          };
+        });
 
-        // 3. Fallback: If globalData is empty, fetch clients from server API
-        if (globalData.length === 0) {
-          try {
-            const resClients = await fetch('/api/clients');
-            if (resClients.ok) {
-              const cData = await resClients.json();
-              if (Array.isArray(cData)) {
-                globalData = cData.map(c => ({
-                  id: c.id,
-                  nombre: c.nombre || c.name || 'Sin Nombre',
-                  telefono: c.telefono || c.phone || '',
-                  source: 'taylor'
-                }));
-              }
-            }
-          } catch (e) {
-            console.warn("Clients API fetch fallback warning:", e);
-          }
-        }
+        // Combine: WhatsApp active chats first, then all Taylor contacts not already represented in active chats
+        const chatPhones = new Set(formattedChats.map((c: any) => (c.phone || '').replace(/\D/g, '').slice(-10)));
+        const combinedClients = [
+          ...formattedChats,
+          ...formattedCrmClients.filter((c: any) => {
+            const digits = (c.phone || '').replace(/\D/g, '').slice(-10);
+            return !digits || !chatPhones.has(digits);
+          })
+        ];
 
-        setAllContacts(globalData);
+        setClients(combinedClients);
+        setAllContacts(clientsData);
+        setSyncedPhones(new Set(combinedClients.map((c: any) => c.id)));
 
+        // Match requested phone or auto-select first client
         const clean = (p: string) => (p || '').replace(/\D/g, '');
         const targetPhone = clean(phoneParam || '');
-        
-        let matched = targetPhone ? formattedChats.find((c: any) => clean(c.phone) === targetPhone) : null;
-        
-        if (phoneParam && !matched) {
-          const globalMatch = globalData.find((c: any) => clean(c.telefono) === targetPhone);
-          if (globalMatch) {
-            matched = {
-              id: globalMatch.id,
-              name: globalMatch.nombre,
-              phone: globalMatch.telefono,
-              status: 'Disponible',
-              type: globalMatch.source === 'google' ? 'Google' : 'Taylor'
-            };
-            formattedChats.unshift(matched);
-          }
-        }
+        let matched = targetPhone ? combinedClients.find((c: any) => clean(c.phone) === targetPhone) : null;
 
-        setClients(formattedChats);
-        // Automatically allow reading loaded chats
-        setSyncedPhones(new Set(formattedChats.map((c: any) => c.id)));
-        
         if (!hasInitialized) {
           if (matched) {
             setSelectedChat(matched);
             setSyncedPhones(prev => new Set(prev).add(matched.id));
-          } else if (formattedChats.length > 0 && !phoneParam) {
-            setSelectedChat(formattedChats[0]);
+          } else if (combinedClients.length > 0 && !phoneParam) {
+            setSelectedChat(combinedClients[0]);
           }
           setHasInitialized(true);
         }
+
+        // Background Google Contacts sync check (non-blocking)
+        setTimeout(() => {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 4000);
+          fetch('/api/sync/contacts', { signal: controller.signal })
+            .then(r => r.ok ? r.json() : [])
+            .then(gData => {
+              clearTimeout(timer);
+              if (Array.isArray(gData) && gData.length > 0) {
+                setAllContacts(prev => [...prev, ...gData]);
+              }
+            })
+            .catch(() => clearTimeout(timer));
+        }, 1000);
 
       } catch (err) {
         console.error('Error fetching data:', err);
