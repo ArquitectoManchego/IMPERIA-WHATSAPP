@@ -212,19 +212,24 @@ export default function DashboardPage() {
           console.error("Global search fetch failed:", e);
         }
 
-        // 3. Fallback: If globalData is empty, fetch Taylor directly
+        // 3. Fallback: If globalData is empty, fetch clients from server API
         if (globalData.length === 0) {
-          const { db } = await import('@/lib/firebase');
-          const { collection, getDocs, query } = await import('firebase/firestore');
-          const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-          const clientsPath = `artifacts/${projectId}/public/data/clients`;
-          const snapshot = await getDocs(query(collection(db, clientsPath)));
-          globalData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            nombre: doc.data().nombre,
-            telefono: doc.data().telefono,
-            source: 'taylor'
-          }));
+          try {
+            const resClients = await fetch('/api/clients');
+            if (resClients.ok) {
+              const cData = await resClients.json();
+              if (Array.isArray(cData)) {
+                globalData = cData.map(c => ({
+                  id: c.id,
+                  nombre: c.nombre || c.name || 'Sin Nombre',
+                  telefono: c.telefono || c.phone || '',
+                  source: 'taylor'
+                }));
+              }
+            }
+          } catch (e) {
+            console.warn("Clients API fetch fallback warning:", e);
+          }
         }
 
         setAllContacts(globalData);

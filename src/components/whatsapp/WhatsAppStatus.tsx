@@ -12,22 +12,58 @@ import {
   X
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/use-toast';
+import { cn } from '@/lib/utils';
 
 export function WhatsAppStatus() {
+  const { toast } = useToast();
   const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [restarting, setRestarting] = useState(false);
   const [polling, setPolling] = useState(true);
   const [showModal, setShowModal] = useState(false);
 
   const fetchStatus = async (restart = false) => {
+    if (restart) setRestarting(true);
     try {
-      const res = await fetch('/api/whatsapp/status', restart ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({restart:true})} : undefined);
+      const res = await fetch('/api/whatsapp/status', restart ? {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ restart: true })
+      } : undefined);
+      
       const data = await res.json();
-      setStatus(data);
-    } catch (err) {
+      if (!res.ok) {
+        if (restart) {
+          toast({
+            title: "Aviso de Conexión",
+            description: data.error || "No se pudo reiniciar el motor de WhatsApp",
+            variant: "destructive"
+          });
+        }
+      } else {
+        setStatus(data);
+        if (restart) {
+          toast({
+            title: data.isReady ? "¡Conexión Exitosa!" : "Reinicio en Curso",
+            description: data.isReady 
+              ? "El motor de WhatsApp está conectado y listo para operar." 
+              : "Iniciando motor de WhatsApp, por favor espera unos segundos...",
+          });
+        }
+      }
+    } catch (err: any) {
       console.error('Error fetching WhatsApp status:', err);
+      if (restart) {
+        toast({
+          title: "Error de Red",
+          description: err.message || "Error al comunicarse con el servidor",
+          variant: "destructive"
+        });
+      }
     } finally {
       setLoading(false);
+      if (restart) setRestarting(false);
     }
   };
 
@@ -155,12 +191,13 @@ export function WhatsAppStatus() {
 
                 <div className="flex gap-2 mt-4 w-full">
                   <Button 
-                    onClick={() => { setLoading(true); fetchStatus(true); }}
+                    onClick={() => fetchStatus(true)}
+                    disabled={restarting}
                     variant="outline"
-                    className="w-full h-12 bg-white/5 border-white/10 hover:bg-white/10 text-white gap-2 rounded-2xl text-xs font-bold uppercase tracking-widest"
+                    className="w-full h-12 bg-white/5 border-white/10 hover:bg-white/10 text-white gap-2 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all active:scale-95"
                   >
-                    <RefreshCw className="w-4 h-4" />
-                    Reiniciar Conexión
+                    <RefreshCw className={cn("w-4 h-4", restarting && "animate-spin text-emerald-400")} />
+                    {restarting ? 'Iniciando motor...' : 'Reiniciar Conexión'}
                   </Button>
                 </div>
               </div>

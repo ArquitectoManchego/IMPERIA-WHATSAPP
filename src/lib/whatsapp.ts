@@ -169,6 +169,19 @@ const checkAndUpdateStatus = async () => {
     globalForWhatsApp.whatsappStatus.isReady = isConnected;
     globalForWhatsApp.whatsappStatus.isAuthenticated = isConnected;
     globalForWhatsApp.whatsappStatus.isInitializing = isStarting;
+    (globalForWhatsApp.whatsappStatus as any).sessionStatus = status;
+
+    // Auto-start disconnected or stopped session on available gateway
+    if ((status === 'disconnected' || status === 'stopped') && !globalForWhatsApp.whatsappStatus.isInitializing) {
+      const isVercel = process.env.VERCEL === '1';
+      const isLocalhost = baseURL.includes('localhost') || baseURL.includes('127.0.0.1');
+      if (!isVercel || !isLocalhost) {
+        addLog(`Sesión OpenWA en estado '${status}'. Auto-iniciando motor...`);
+        initializeWhatsApp(true).catch(err => {
+          addLog(`Error en auto-inicio: ${err.message}`, 'error');
+        });
+      }
+    }
     
     if (isConnected && !globalForWhatsApp.webhookRegistered) {
       registerWebhookIfNeeded().then(() => {
