@@ -235,10 +235,16 @@ export const getWhatsAppClient = () => {
 
 const recentSends = new Map<string, { time: number; result: any }>();
 
-export const sendMessage = async (chatId: string, message: string, mediaBase64?: string, fallbackPhone?: string) => {
+export const sendMessage = async (
+  chatId: string, 
+  message: string, 
+  mediaBase64?: string, 
+  fallbackPhone?: string,
+  options?: { isSticker?: boolean; isGif?: boolean }
+) => {
   addLog(`Enviando mensaje a ${chatId}...`);
   
-  const debounceKey = `${chatId}:${(message || '').trim()}:${mediaBase64 ? 'media' : 'text'}`;
+  const debounceKey = `${chatId}:${(message || '').trim()}:${options?.isSticker ? 'sticker' : (options?.isGif ? 'gif' : (mediaBase64 ? 'media' : 'text'))}:${mediaBase64 ? mediaBase64.slice(-30) : ''}`;
   const now = Date.now();
   const cachedSend = recentSends.get(debounceKey);
   if (cachedSend && (now - cachedSend.time) < 3000) {
@@ -267,12 +273,13 @@ export const sendMessage = async (chatId: string, message: string, mediaBase64?:
 
       const isHttpUrl = mediaBase64.startsWith('http://') || mediaBase64.startsWith('https://');
       if (isHttpUrl) {
+        const endpoint = options?.isSticker ? 'send-sticker' : (options?.isGif ? 'send-video' : 'send-image');
         return await axios.post(
-          `${baseURL}/sessions/${sessionId}/messages/send-image`,
+          `${baseURL}/sessions/${sessionId}/messages/${endpoint}`,
           {
             chatId: target,
             url: mediaBase64,
-            caption: message || undefined
+            caption: options?.isSticker ? undefined : (message || undefined)
           },
           { headers: getHeaders(), timeout: 30000 }
         );
@@ -280,13 +287,19 @@ export const sendMessage = async (chatId: string, message: string, mediaBase64?:
 
       // Extract mimetype and raw clean base64 data
       const mimeMatch = mediaBase64.match(/^data:([^;]+);base64,/);
-      const mimetype = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+      const mimetype = mimeMatch ? mimeMatch[1] : (options?.isSticker ? 'image/webp' : 'image/jpeg');
       const cleanBase64 = mediaBase64.replace(/^data:[^;]+;base64,/, '');
 
       let endpoint = 'send-image';
       let extension = 'jpg';
 
-      if (mimetype.startsWith('video/')) {
+      if (options?.isSticker) {
+        endpoint = 'send-sticker';
+        extension = 'webp';
+      } else if (options?.isGif || mimetype.includes('gif')) {
+        endpoint = 'send-video';
+        extension = mimetype.split('/')[1] || 'mp4';
+      } else if (mimetype.startsWith('video/')) {
         endpoint = 'send-video';
         extension = mimetype.split('/')[1] || 'mp4';
       } else if (mimetype.startsWith('audio/')) {
@@ -304,7 +317,7 @@ export const sendMessage = async (chatId: string, message: string, mediaBase64?:
         chatId: target,
         base64: cleanBase64,
         mimetype,
-        caption: message || undefined,
+        caption: options?.isSticker ? undefined : (message || undefined),
         filename: `attachment_${Date.now()}.${extension}`
       };
 
@@ -363,8 +376,11 @@ export const sendMessage = async (chatId: string, message: string, mediaBase64?:
       to: finalId,
       fromMe: true,
       timestamp: Math.floor(Date.now() / 1000),
-      type: mediaBase64 ? 'image' : 'chat',
-      hasMedia: !!mediaBase64
+      type: options?.isSticker ? 'sticker' : (options?.isGif ? 'video' : (mediaBase64 ? 'image' : 'chat')),
+      hasMedia: !!mediaBase64,
+      mediaUrl: mediaBase64,
+      isSticker: !!options?.isSticker,
+      isGif: !!options?.isGif
     };
 
     // Update in-memory cache for all associated identifiers

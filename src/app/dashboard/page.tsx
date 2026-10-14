@@ -36,6 +36,7 @@ import { WhatsAppStatus } from '@/components/whatsapp/WhatsAppStatus';
 import CrmPanel from '@/components/CrmPanel';
 import QuickRepliesModal from '@/components/whatsapp/QuickRepliesModal';
 import AiAssistantModal from '@/components/whatsapp/AiAssistantModal';
+import EmojiGifStickerPicker from '@/components/whatsapp/EmojiGifStickerPicker';
 
 export default function DashboardPage() {
   const { toast } = useToast();
@@ -91,6 +92,7 @@ export default function DashboardPage() {
   const [attachment, setAttachment] = useState<string | null>(null);
   const [isQuickRepliesOpen, setIsQuickRepliesOpen] = useState(false);
   const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
+  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
 
   // Bulk sync state
   const [isSyncingHistory, setIsSyncingHistory] = useState(false);
@@ -423,6 +425,125 @@ export default function DashboardPage() {
         variant: "destructive"
       });
       // Rollback optimistic message if send failed
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+    } finally {
+      setSending(false);
+      sendingRef.current = false;
+    }
+  };
+
+  const handleSendSticker = async (stickerData: string) => {
+    if (!selectedChat || sendingRef.current) return;
+
+    sendingRef.current = true;
+    setSending(true);
+
+    const tempId = `temp_stk_${Date.now()}`;
+    const optimisticMsg = {
+      id: tempId,
+      body: '',
+      mediaUrl: stickerData,
+      fromMe: true,
+      timestamp: Math.floor(Date.now() / 1000),
+      hasMedia: true,
+      type: 'sticker',
+      isSticker: true
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+
+    try {
+      const targetId = (selectedChat.id && selectedChat.id.includes('@'))
+        ? selectedChat.id
+        : (selectedChat.phone || selectedChat.id);
+
+      const response = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: targetId,
+          phone: selectedChat.phone,
+          mediaBase64: stickerData,
+          isSticker: true
+        })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        toast({
+          title: "Sticker Enviado",
+          description: `Sticker enviado a ${selectedChat.name || selectedChat.phone || targetId}`,
+        });
+        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: result.messageId || m.id } : m));
+        setTimeout(() => fetchMessages(true), 500);
+      } else {
+        throw new Error(result.error || 'Error al enviar sticker');
+      }
+    } catch (err: any) {
+      toast({
+        title: "Error al enviar sticker",
+        description: err.message || "No se pudo enviar el sticker.",
+        variant: "destructive"
+      });
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+    } finally {
+      setSending(false);
+      sendingRef.current = false;
+    }
+  };
+
+  const handleSendGif = async (gifUrl: string, caption?: string) => {
+    if (!selectedChat || sendingRef.current) return;
+
+    sendingRef.current = true;
+    setSending(true);
+
+    const tempId = `temp_gif_${Date.now()}`;
+    const optimisticMsg = {
+      id: tempId,
+      body: caption || '',
+      mediaUrl: gifUrl,
+      fromMe: true,
+      timestamp: Math.floor(Date.now() / 1000),
+      hasMedia: true,
+      type: 'video',
+      isGif: true
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+
+    try {
+      const targetId = (selectedChat.id && selectedChat.id.includes('@'))
+        ? selectedChat.id
+        : (selectedChat.phone || selectedChat.id);
+
+      const response = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: targetId,
+          phone: selectedChat.phone,
+          message: caption || '',
+          mediaBase64: gifUrl,
+          isGif: true
+        })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        toast({
+          title: "GIF Enviado",
+          description: `GIF enviado a ${selectedChat.name || selectedChat.phone || targetId}`,
+        });
+        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: result.messageId || m.id } : m));
+        setTimeout(() => fetchMessages(true), 500);
+      } else {
+        throw new Error(result.error || 'Error al enviar GIF');
+      }
+    } catch (err: any) {
+      toast({
+        title: "Error al enviar GIF",
+        description: err.message || "No se pudo enviar el GIF.",
+        variant: "destructive"
+      });
       setMessages(prev => prev.filter(m => m.id !== tempId));
     } finally {
       setSending(false);
@@ -764,40 +885,73 @@ export default function DashboardPage() {
                     </div>
                   ) : (
                     <div className="space-y-4 pb-10">
-                      {filteredMessages.map((msg, idx) => (
-                        <div 
-                          key={msg.id || idx} 
-                          className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}
-                        >
-                          <div className={`max-w-[70%] p-4 rounded-2xl text-sm font-medium shadow-xl ${
-                            msg.fromMe 
-                              ? 'bg-emerald-500 text-white rounded-tr-none shadow-emerald-900/20' 
-                              : 'bg-white/5 text-slate-200 border border-white/5 rounded-tl-none shadow-black/20'
-                          }`}>
-                            {msg.mediaUrl ? (
-                              <div className="mb-2 rounded-xl overflow-hidden max-h-60 border border-white/10 shadow-md">
-                                <img src={msg.mediaUrl} alt="Adjunto" className="w-full h-full object-cover" />
+                      {filteredMessages.map((msg, idx) => {
+                        const isSticker = msg.type === 'sticker' || msg.isSticker;
+                        const isGif = msg.isGif;
+                        return (
+                          <div 
+                            key={msg.id || idx} 
+                            className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}
+                          >
+                            {isSticker ? (
+                              <div className="relative group max-w-[200px] p-1 flex flex-col items-end">
+                                <img 
+                                  src={msg.mediaUrl || msg.body} 
+                                  alt="Sticker" 
+                                  className="w-36 h-36 sm:w-44 sm:h-44 object-contain drop-shadow-md select-none transition-transform hover:scale-105" 
+                                />
+                                <div className="text-[9px] mt-1 px-1.5 py-0.5 rounded bg-black/40 text-slate-300 font-bold backdrop-blur-sm">
+                                  {msg.timestamp ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                </div>
                               </div>
-                            ) : msg.hasMedia && msg.type === 'image' && !msg.body ? (
-                              <div className="flex items-center gap-2 mb-1 text-xs opacity-80">
-                                <ImageIcon className="w-4 h-4" />
-                                <span>Imagen</span>
+                            ) : (
+                              <div className={`max-w-[70%] p-4 rounded-2xl text-sm font-medium shadow-xl ${
+                                msg.fromMe 
+                                  ? 'bg-emerald-500 text-white rounded-tr-none shadow-emerald-900/20' 
+                                  : 'bg-white/5 text-slate-200 border border-white/5 rounded-tl-none shadow-black/20'
+                              }`}>
+                                {msg.mediaUrl ? (
+                                  <div className="relative mb-2 rounded-xl overflow-hidden max-h-60 border border-white/10 shadow-md">
+                                    <img src={msg.mediaUrl} alt="Adjunto" className="w-full h-full object-cover" />
+                                    {isGif && (
+                                      <span className="absolute bottom-2 left-2 px-2 py-0.5 bg-black/70 text-white text-[10px] font-black rounded-md tracking-wider">
+                                        GIF
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : msg.hasMedia && msg.type === 'image' && !msg.body ? (
+                                  <div className="flex items-center gap-2 mb-1 text-xs opacity-80">
+                                    <ImageIcon className="w-4 h-4" />
+                                    <span>Imagen</span>
+                                  </div>
+                                ) : null}
+                                {msg.body && <div className="blur-sensitive whitespace-pre-wrap">{msg.body}</div>}
+                                <div className={`text-[9px] mt-2 opacity-50 ${msg.fromMe ? 'text-right' : 'text-left'} font-bold`}>
+                                   {msg.timestamp ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                </div>
                               </div>
-                            ) : null}
-                            {msg.body && <div className="blur-sensitive whitespace-pre-wrap">{msg.body}</div>}
-                            <div className={`text-[9px] mt-2 opacity-50 ${msg.fromMe ? 'text-right' : 'text-left'} font-bold`}>
-                               {msg.timestamp ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                            </div>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </>
               )}
             </div>
 
-            <footer className="p-3 sm:p-6 md:p-8 glass z-10 border-t border-white/5 shrink-0">
+            <footer className="p-3 sm:p-6 md:p-8 glass z-20 border-t border-white/5 shrink-0 relative">
+              {/* Emoji, GIF & Sticker Picker Drawer */}
+              <EmojiGifStickerPicker
+                isOpen={isEmojiPickerOpen}
+                onClose={() => setIsEmojiPickerOpen(false)}
+                onSelectEmoji={(emoji) => {
+                  setMessageText(prev => prev + emoji);
+                }}
+                onSendGif={handleSendGif}
+                onSendSticker={handleSendSticker}
+              />
+
               <input 
                 type="file" 
                 ref={fileInputRef} 
@@ -832,6 +986,21 @@ export default function DashboardPage() {
                   className="rounded-xl text-slate-400 hover:text-white h-10 w-10 sm:h-12 sm:w-12 shrink-0"
                 >
                   <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
+                </Button>
+                <Button 
+                  size="icon" 
+                  variant="ghost" 
+                  data-picker-toggle="true"
+                  onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
+                  title="Emojis, GIFs y Stickers"
+                  className={cn(
+                    "rounded-xl h-10 w-10 sm:h-12 sm:w-12 shrink-0 transition-all",
+                    isEmojiPickerOpen 
+                      ? "text-emerald-400 bg-emerald-500/10 ring-1 ring-emerald-500/30" 
+                      : "text-slate-400 hover:text-white hover:bg-white/5"
+                  )}
+                >
+                  <Smile className="w-4 h-4 sm:w-5 sm:h-5" />
                 </Button>
                 <div className="flex-1 relative flex flex-col gap-2 min-w-0">
                   {attachment && (
