@@ -20,7 +20,8 @@ import {
   ChevronRight, 
   AlertTriangle,
   User,
-  ArrowRight
+  ArrowRight,
+  X
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCrmUi } from '@/context/CrmUiContext';
@@ -40,7 +41,7 @@ export default function CrmKanbanPage() {
 
   // Filters & Tabs
   const [search, setSearch] = useState('');
-  const [selectedTag, setSelectedTag] = useState<string>('all');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [inactiveOnly, setInactiveOnly] = useState(false);
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
 
@@ -80,16 +81,25 @@ export default function CrmKanbanPage() {
     loadPipeline();
   }, []);
 
-  // Compute available tags
-  const allTags = useMemo(() => {
-    const tagsSet = new Set<string>();
+  // Compute available tags with frequency
+  const allTagsWithCount = useMemo(() => {
+    const counts: Record<string, number> = {};
     contacts.forEach(c => {
-      if (Array.isArray(c.tags)) c.tags.forEach((t: string) => tagsSet.add(t));
+      if (Array.isArray(c.tags)) {
+        c.tags.forEach((t: string) => {
+          if (t && typeof t === 'string') {
+            const clean = t.trim();
+            counts[clean] = (counts[clean] || 0) + 1;
+          }
+        });
+      }
     });
-    return Array.from(tagsSet);
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => ({ name, count }));
   }, [contacts]);
 
-  // Filtered Contacts
+  // Filtered Contacts (Stackable AND logic)
   const filteredContacts = useMemo(() => {
     return contacts.filter(contact => {
       // Search filter
@@ -97,9 +107,10 @@ export default function CrmKanbanPage() {
         (contact.nombre || '').toLowerCase().includes(search.toLowerCase()) ||
         (contact.telefono || '').includes(search);
 
-      // Tag filter
-      const matchesTag = selectedTag === 'all' || 
-        (Array.isArray(contact.tags) && contact.tags.includes(selectedTag));
+      // Stackable Tag filter (AND logic: contact must have ALL selected tags)
+      const contactTags = Array.isArray(contact.tags) ? contact.tags.map((t: string) => t.toLowerCase()) : [];
+      const matchesTag = selectedTags.length === 0 || 
+        selectedTags.every(st => contactTags.includes(st.toLowerCase()));
 
       // Inactivity filter (> 3 days)
       const inactivity = isContactInactive(contact.updatedAt || contact.createdAt, 3);
@@ -107,7 +118,7 @@ export default function CrmKanbanPage() {
 
       return matchesSearch && matchesTag && matchesInactivity;
     });
-  }, [contacts, search, selectedTag, inactiveOnly]);
+  }, [contacts, search, selectedTags, inactiveOnly]);
 
   // Move Contact to another stage
   const moveContactStage = async (phone: string, targetStageId: string) => {
@@ -284,21 +295,6 @@ export default function CrmKanbanPage() {
             />
           </div>
 
-          {/* Tag Dropdown */}
-          <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300">
-            <Tag className="w-3.5 h-3.5 text-slate-500" />
-            <select
-              value={selectedTag}
-              onChange={e => setSelectedTag(e.target.value)}
-              className="bg-transparent text-xs text-slate-300 focus:outline-none cursor-pointer"
-            >
-              <option value="all">Todas las etiquetas</option>
-              {allTags.map(tag => (
-                <option key={tag} value={tag} className="bg-slate-900">{tag}</option>
-              ))}
-            </select>
-          </div>
-
           {/* Inactivity Filter Button */}
           <button
             onClick={() => setInactiveOnly(!inactiveOnly)}
@@ -358,6 +354,55 @@ export default function CrmKanbanPage() {
           </button>
         </div>
       </header>
+
+      {/* Stackable Tag Filter Strip (AND logic) */}
+      <div className="px-4 sm:px-6 py-2.5 border-b border-white/5 bg-slate-900/60 flex flex-wrap items-center gap-2 text-xs shrink-0">
+        <div className="flex items-center gap-1.5 text-slate-400 font-bold shrink-0 text-[11px]">
+          <Tag className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Filtrar por Etiquetas:</span>
+        </div>
+
+        {/* Selected Stacked Tags (AND logic active) */}
+        {selectedTags.map(tag => (
+          <span 
+            key={tag}
+            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-emerald-500 text-slate-950 shadow-sm"
+          >
+            <span>✓ {tag}</span>
+            <button
+              onClick={() => setSelectedTags(prev => prev.filter(t => t !== tag))}
+              className="hover:bg-slate-900/20 rounded p-0.5 ml-0.5"
+            >
+              <X className="w-2.5 h-2.5" />
+            </button>
+          </span>
+        ))}
+
+        {/* Available Tags to Stack */}
+        <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 custom-scrollbar max-w-full">
+          {allTagsWithCount.filter(t => !selectedTags.includes(t.name)).map(({ name, count }) => (
+            <button
+              key={name}
+              onClick={() => setSelectedTags(prev => [...prev, name])}
+              className="px-2.5 py-0.5 rounded-lg text-[11px] font-medium bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/60 hover:border-emerald-500/50 flex items-center gap-1.5 shrink-0 transition-colors"
+            >
+              <span>+ {name}</span>
+              <span className="px-1.5 py-0.2 rounded-full text-[9px] font-mono bg-white/10 text-slate-400">
+                {count}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {selectedTags.length > 0 && (
+          <button
+            onClick={() => setSelectedTags([])}
+            className="text-emerald-400 hover:text-emerald-300 font-semibold text-[11px] ml-auto shrink-0"
+          >
+            Limpiar filtros ({selectedTags.length})
+          </button>
+        )}
+      </div>
 
       {/* Main Board Content */}
       <div className="flex-1 overflow-x-auto p-4 sm:p-6 overflow-y-hidden touch-pan-x custom-scrollbar">
@@ -459,8 +504,12 @@ export default function CrmKanbanPage() {
                           {/* Card Top */}
                           <div className="flex items-start justify-between gap-2 mb-2">
                             <div className="flex items-center gap-2 min-w-0">
-                              <div className="w-8 h-8 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center font-bold text-xs shrink-0 ring-1 ring-white/5">
-                                {(contact.nombre || contact.telefono || '?').slice(0, 2).toUpperCase()}
+                              <div className="w-8 h-8 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center font-bold text-xs shrink-0 ring-1 ring-white/5 overflow-hidden">
+                                {contact.avatar ? (
+                                  <img src={contact.avatar} alt={contact.nombre} className="w-full h-full object-cover" />
+                                ) : (
+                                  (contact.nombre || contact.telefono || '?').slice(0, 2).toUpperCase()
+                                )}
                               </div>
                               <div className="min-w-0">
                                 <h4 className="font-semibold text-xs text-white truncate blur-sensitive">

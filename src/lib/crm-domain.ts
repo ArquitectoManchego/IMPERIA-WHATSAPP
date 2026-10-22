@@ -41,6 +41,44 @@ export function notificationFor(previous: any, current: any, today: string) {
   return null;
 }
 
+export function extractInstitutionalTags(row: any): string[] {
+  const tags = new Set<string>();
+  const text = [
+    row.grupo_graduacion,
+    row.notas_extra,
+    ...(Array.isArray(row.articulos) ? row.articulos.map((a: any) => typeof a === 'string' ? a : (a?.descripcion || '')) : [])
+  ].filter(Boolean).join(' ').toUpperCase();
+
+  if (text.includes('UV') || text.includes('UNIVERSIDAD VERACRUZANA')) {
+    tags.add('Universidad Veracruzana');
+  }
+  if (text.includes('ENFRA') || text.includes('ENFERMERIA') || text.includes('ENFERMERÍA')) {
+    tags.add('Facultad de Enfermería');
+  }
+  if (text.includes('NUTRICION') || text.includes('NUTRICIÓN')) {
+    tags.add('Facultad de Nutrición');
+  }
+  if (text.includes('UNIVERSIDAD DE ORIENTE') || text.includes('#SOYUO') || text.includes(' UO')) {
+    tags.add('Universidad de Oriente');
+  }
+  if (text.includes('AMPARO DEL CASTILLO') || text.includes('AMPARO')) {
+    tags.add('Amparo del Castillo');
+  }
+  if (text.includes('CETUG')) {
+    tags.add('CETUG');
+  }
+  if (text.includes('IMSS')) {
+    tags.add('IMSS');
+  }
+  if (text.includes('SESVER')) {
+    tags.add('SESVER');
+  }
+  if (text.includes('CVC')) {
+    tags.add('CVC');
+  }
+  return Array.from(tags);
+}
+
 // ==========================================
 // Extensión CRM: Etapas, Oportunidades, Respuestas y Automatización
 // ==========================================

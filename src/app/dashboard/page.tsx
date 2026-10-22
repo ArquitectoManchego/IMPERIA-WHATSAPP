@@ -25,7 +25,10 @@ import {
   Zap,
   Calendar,
   ArrowLeft,
-  UserCheck
+  UserCheck,
+  Award,
+  ZoomIn,
+  Check
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -37,6 +40,7 @@ import CrmPanel from '@/components/CrmPanel';
 import QuickRepliesModal from '@/components/whatsapp/QuickRepliesModal';
 import AiAssistantModal from '@/components/whatsapp/AiAssistantModal';
 import EmojiGifStickerPicker from '@/components/whatsapp/EmojiGifStickerPicker';
+import ContactPhotoModal from '@/components/whatsapp/ContactPhotoModal';
 
 export default function DashboardPage() {
   const { toast } = useToast();
@@ -48,20 +52,49 @@ export default function DashboardPage() {
   const [selectedChat, setSelectedChat] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [hasInitialized, setHasInitialized] = useState(false);
   const [showMobileCrm, setShowMobileCrm] = useState(false);
+  const [isChatPhotoModalOpen, setIsChatPhotoModalOpen] = useState(false);
+  const [selectedChatLoyalty, setSelectedChatLoyalty] = useState<any>(null);
 
+  // Compute available tags with counts
+  const availableTags = React.useMemo(() => {
+    const tagCountMap: Record<string, number> = {};
+    clients.forEach(c => {
+      if (Array.isArray(c.tags)) {
+        c.tags.forEach((t: string) => {
+          if (t && typeof t === 'string') {
+            const cleanTag = t.trim();
+            tagCountMap[cleanTag] = (tagCountMap[cleanTag] || 0) + 1;
+          }
+        });
+      }
+    });
+    return Object.entries(tagCountMap)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => ({ name, count }));
+  }, [clients]);
 
-
+  // Stackable multi-tag filter (AND logic: client must have ALL selected tags)
   const filteredClients = React.useMemo(() => {
     const search = searchTerm.toLowerCase().trim();
-    if (!search) return clients;
 
-    return clients.filter(c => 
-      (c.name || '').toLowerCase().includes(search) ||
-      (c.phone || '').includes(search)
-    );
-  }, [searchTerm, clients]);
+    return clients.filter(c => {
+      // Search term filter
+      const matchesSearch = !search || 
+        (c.name || '').toLowerCase().includes(search) ||
+        (c.phone || '').includes(search) ||
+        (c.lastMessage || '').toLowerCase().includes(search);
+
+      // Stackable tags (AND logic)
+      const clientTags = Array.isArray(c.tags) ? c.tags.map((t: string) => t.toLowerCase()) : [];
+      const matchesTags = selectedTags.length === 0 || 
+        selectedTags.every(st => clientTags.includes(st.toLowerCase()));
+
+      return matchesSearch && matchesTags;
+    });
+  }, [searchTerm, selectedTags, clients]);
 
   const [messageText, setMessageText] = useState('');
   const [sending, setSending] = useState(false);
@@ -182,32 +215,63 @@ export default function DashboardPage() {
         const clientsData = resClientsSettled.status === 'fulfilled' && Array.isArray(resClientsSettled.value) 
           ? resClientsSettled.value 
           : [];
+        // Helper to extract tags from text
+        const extractTagsFromText = (text: string): string[] => {
+          const upper = (text || '').toUpperCase();
+          const tags = new Set<string>();
+          if (upper.includes('UNIVERSIDAD DE ORIENTE') || upper.includes(' DE ORIENTE') || upper.includes('UO')) tags.add('Universidad de Oriente');
+          if (upper.includes('UNIVERSIDAD VERACRUZANA') || upper.includes(' UV ') || upper.startsWith('UV ') || upper.endsWith(' UV') || upper === 'UV') tags.add('Universidad Veracruzana');
+          if (upper.includes('ENFRA') || upper.includes('ENFERMERIA') || upper.includes('ENFERMERÍA')) tags.add('Facultad de Enfermería');
+          if (upper.includes('NUTRICION') || upper.includes('NUTRICIÓN')) tags.add('Facultad de Nutrición');
+          if (upper.includes('AMPARO DEL CASTILLO') || upper.includes('AMPARO')) tags.add('Amparo del Castillo');
+          if (upper.includes('CETUG')) tags.add('CETUG');
+          if (upper.includes('IMSS')) tags.add('IMSS');
+          if (upper.includes('SESVER')) tags.add('SESVER');
+          if (upper.includes('GRADUACION') || upper.includes('GRADUACIÓN')) tags.add('Graduación');
+          return Array.from(tags);
+        };
 
         // Format active WhatsApp chats
-        const formattedChats = chatsData.map((c: any) => ({
-          id: c.id,
-          name: c.name || 'Sin Nombre',
-          phone: c.phone || (c.id?.endsWith?.('@c.us') ? c.id.split('@')[0] : c.id),
-          status: 'Reciente',
-          type: 'WhatsApp',
-          lastMessage: c.lastMessage || '',
-          timestamp: c.timestamp
-        }));
+        const formattedChats = chatsData.map((c: any) => {
+          const rawPhone = c.phone || (c.id?.endsWith?.('@c.us') ? c.id.split('@')[0] : c.id);
+          const digits = (rawPhone || '').replace(/\D/g, '').slice(-10);
+          const matchedCrm = digits ? clientsData.find((cl: any) => (cl.telefono || cl.phone || '').replace(/\D/g, '').slice(-10) === digits) : null;
+          
+          const nameTags = extractTagsFromText(c.name || '');
+          const crmTags = Array.isArray(matchedCrm?.tags) ? matchedCrm.tags : [];
+          const combinedTags = Array.from(new Set([...crmTags, ...nameTags]));
+          const displayName = matchedCrm?.nombre || c.name || 'Sin Nombre';
+
+          return {
+            id: c.id,
+            name: displayName,
+            phone: rawPhone || '',
+            status: matchedCrm ? (matchedCrm.status === 'cliente' ? 'Cliente' : 'Prospecto') : 'Reciente',
+            type: 'WhatsApp',
+            lastMessage: c.lastMessage || '',
+            timestamp: c.timestamp,
+            stage: matchedCrm?.stage || 'nuevo',
+            tags: combinedTags,
+            avatar: c.avatar || matchedCrm?.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0f172a&color=34d399&size=128&bold=true&format=svg`
+          };
+        });
 
         // Format CRM / Taylor contacts
         const formattedCrmClients = clientsData.map((c: any) => {
           const rawPhone = (c.telefono || c.phone || '').replace(/\D/g, '');
           const id = c.id?.endsWith?.('@c.us') ? c.id : (rawPhone ? `${rawPhone}@c.us` : c.id);
+          const displayName = c.nombre || c.name || 'Sin Nombre';
           return {
             id,
             contactId: c.id,
-            name: c.nombre || c.name || 'Sin Nombre',
+            name: displayName,
             phone: c.telefono || c.phone || '',
             status: c.status === 'cliente' ? 'Cliente' : 'Disponible',
             type: c.source === 'google' ? 'Google' : 'Taylor',
             isGlobal: true,
             stage: c.stage,
-            tags: c.tags || []
+            tags: c.tags || [],
+            avatar: c.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0f172a&color=34d399&size=128&bold=true&format=svg`
           };
         });
 
@@ -234,8 +298,20 @@ export default function DashboardPage() {
           if (matched) {
             setSelectedChat(matched);
             setSyncedPhones(prev => new Set(prev).add(matched.id));
+            if (matched.phone) {
+              fetch(`/api/crm/loyalty?phone=${encodeURIComponent(matched.phone)}`)
+                .then(r => r.ok ? r.json() : null)
+                .then(data => { if (data) setSelectedChatLoyalty(data); })
+                .catch(() => {});
+            }
           } else if (combinedClients.length > 0 && !phoneParam) {
             setSelectedChat(combinedClients[0]);
+            if (combinedClients[0].phone) {
+              fetch(`/api/crm/loyalty?phone=${encodeURIComponent(combinedClients[0].phone)}`)
+                .then(r => r.ok ? r.json() : null)
+                .then(data => { if (data) setSelectedChatLoyalty(data); })
+                .catch(() => {});
+            }
           }
           setHasInitialized(true);
         }
@@ -278,6 +354,12 @@ export default function DashboardPage() {
     console.log(`[UI] Selecting Chat: ${chat.name} (${chat.id})`);
     setSelectedChat(chat);
     setSyncedPhones(prev => new Set(prev).add(chat.id));
+    if (chat.phone) {
+      fetch(`/api/crm/loyalty?phone=${encodeURIComponent(chat.phone)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data) setSelectedChatLoyalty(data); })
+        .catch(() => {});
+    }
   };
 
   const handleStartBulkSync = async () => {
@@ -639,6 +721,85 @@ export default function DashboardPage() {
             />
           </div>
 
+          {/* Stackable Tag Filter Pills (AND logic) */}
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-slate-400 font-bold flex items-center gap-1">
+                <Tag className="w-3 h-3 text-emerald-400" />
+                <span>Filtrar por Etiquetas ({availableTags.length})</span>
+              </span>
+              {selectedTags.length > 0 && (
+                <button
+                  onClick={() => setSelectedTags([])}
+                  className="text-emerald-400 hover:text-emerald-300 font-semibold text-[10px]"
+                >
+                  Limpiar filtros
+                </button>
+              )}
+            </div>
+
+            {/* Active Stacked Tags (AND logic banner) */}
+            {selectedTags.length > 0 && (
+              <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 space-y-1.5">
+                <div className="flex items-center justify-between text-[10px] text-emerald-300 font-bold">
+                  <span>Filtros apilados (Coincidir TODAS):</span>
+                  <span>{filteredClients.length} de {clients.length}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {selectedTags.map((tag) => (
+                    <span 
+                      key={tag}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-emerald-500 text-slate-950 shadow-sm"
+                    >
+                      <Check className="w-2.5 h-2.5" />
+                      <span>{tag}</span>
+                      <button
+                        onClick={() => setSelectedTags(prev => prev.filter(t => t !== tag))}
+                        className="hover:bg-slate-900/20 rounded p-0.5 ml-0.5"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Available Tag Pills Carousel */}
+            <div className="flex gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+              {availableTags.map(({ name, count }) => {
+                const isSelected = selectedTags.includes(name);
+                return (
+                  <button
+                    key={name}
+                    onClick={() => {
+                      if (isSelected) {
+                        setSelectedTags(prev => prev.filter(t => t !== name));
+                      } else {
+                        setSelectedTags(prev => [...prev, name]);
+                      }
+                    }}
+                    className={cn(
+                      "px-2.5 py-1 rounded-xl text-[10px] font-bold whitespace-nowrap transition-all flex items-center gap-1.5 shrink-0 border",
+                      isSelected
+                        ? "bg-emerald-500 text-slate-950 border-emerald-400 shadow-sm"
+                        : "bg-white/5 hover:bg-white/10 text-slate-300 border-white/10 hover:border-white/20"
+                    )}
+                  >
+                    <span>{isSelected ? '✓' : '+'}</span>
+                    <span>{name}</span>
+                    <span className={cn(
+                      "px-1 py-0.2 rounded-full text-[9px] font-mono",
+                      isSelected ? "bg-slate-950/30 text-white" : "bg-white/10 text-slate-400"
+                    )}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Progress Bar for Bulk Sync */}
           {isSyncingHistory && (
             <div className="mt-3 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl space-y-2">
@@ -706,12 +867,25 @@ export default function DashboardPage() {
                   {syncedPhones.has(chat.id) && <CheckCheck className="w-3 h-3 text-white" />}
                 </div>
 
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center border border-white/10 shrink-0 overflow-hidden">
+                <div 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedChat(chat);
+                    setIsChatPhotoModalOpen(true);
+                  }}
+                  title="Clic para ver foto ampliada"
+                  className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center border border-white/10 shrink-0 overflow-hidden relative cursor-pointer group/avatar hover:ring-2 hover:ring-emerald-400 transition-all shadow-inner"
+                >
                   {chat.avatar ? (
-                    <img src={chat.avatar} alt={chat.name} className="w-full h-full object-cover" />
+                    <img src={chat.avatar} alt={chat.name} className="w-full h-full object-cover group-hover/avatar:scale-110 transition-transform" />
                   ) : (
-                    <User className="w-5 h-5 text-slate-400" />
+                    <div className="w-full h-full flex items-center justify-center font-bold text-xs text-emerald-400 bg-slate-800">
+                      {(chat.name || 'C').slice(0, 2).toUpperCase()}
+                    </div>
                   )}
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/avatar:opacity-100 flex items-center justify-center transition-opacity">
+                    <ZoomIn className="w-3.5 h-3.5 text-white" />
+                  </div>
                 </div>
                 
                 <div className="flex-1 min-w-0">
@@ -722,6 +896,19 @@ export default function DashboardPage() {
                   <p className="text-[11px] text-slate-500 truncate leading-tight font-medium blur-sensitive">
                     {chat.phone}
                   </p>
+                  {/* Tag chips on contact */}
+                  {Array.isArray(chat.tags) && chat.tags.length > 0 && (
+                    <div className="flex items-center gap-1 mt-1 flex-wrap">
+                      {chat.tags.slice(0, 2).map((t: string) => (
+                        <span key={t} className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 truncate max-w-[130px]">
+                          {t}
+                        </span>
+                      ))}
+                      {chat.tags.length > 2 && (
+                        <span className="text-[9px] text-slate-500 font-bold">+{chat.tags.length - 2}</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ))
@@ -753,22 +940,45 @@ export default function DashboardPage() {
                   <ArrowLeft className="w-5 h-5" />
                 </Button>
 
-                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-slate-800 flex items-center justify-center border border-white/10 overflow-hidden shrink-0">
+                {/* Enlarged Avatar in Header with Lightbox Trigger */}
+                <div 
+                  onClick={() => setIsChatPhotoModalOpen(true)}
+                  title="Clic para ver foto en tamaño grande"
+                  className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden ring-2 ring-emerald-500/40 hover:ring-emerald-400 cursor-pointer transition-all shrink-0 relative group shadow-md"
+                >
                   {selectedChat.avatar ? (
-                    <img src={selectedChat.avatar} alt={selectedChat.name} className="w-full h-full object-cover" />
+                    <img src={selectedChat.avatar} alt={selectedChat.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                   ) : (
-                    <User className="w-5 h-5 text-slate-400" />
+                    <div className="w-full h-full flex items-center justify-center font-bold text-base text-emerald-400 bg-slate-800">
+                      {(selectedChat.name || 'C').slice(0, 2).toUpperCase()}
+                    </div>
                   )}
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                    <ZoomIn className="w-4 h-4 text-white drop-shadow" />
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <h3 className="font-bold text-white tracking-tight blur-sensitive truncate">{selectedChat.name || 'Selecciona un chat'}</h3>
-                  <div className="flex items-center gap-2">
-                    <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest blur-sensitive">
-                      ID: {selectedChat.id}
+
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-bold text-white tracking-tight blur-sensitive truncate">{selectedChat.name || 'Selecciona un chat'}</h3>
+                    {selectedChatLoyalty && (
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${selectedChatLoyalty.tierBadgeColor}`}>
+                        Nivel {selectedChatLoyalty.tierName} • {selectedChatLoyalty.currentPoints} pts
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-[10px] text-slate-400 font-mono blur-sensitive">
+                      {selectedChat.phone || selectedChat.id}
                     </p>
                     {selectedChat.id.includes('@g.us') && (
                       <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-500 text-[8px] font-black rounded border border-amber-500/20">GRUPO</span>
                     )}
+                    {Array.isArray(selectedChat.tags) && selectedChat.tags.map((t: string) => (
+                      <span key={t} className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-white/5 text-slate-300 border border-white/10">
+                        {t}
+                      </span>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -1215,6 +1425,14 @@ export default function DashboardPage() {
         currentDraft={messageText}
         contactName={selectedChat?.name}
         onApply={(improved) => setMessageText(improved)}
+      />
+
+      {/* Modal Foto de Contacto Ampliada & Lightbox */}
+      <ContactPhotoModal
+        isOpen={isChatPhotoModalOpen}
+        onClose={() => setIsChatPhotoModalOpen(false)}
+        contact={selectedChat}
+        loyaltyProfile={selectedChatLoyalty}
       />
     </div>
   );

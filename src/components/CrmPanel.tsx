@@ -14,11 +14,25 @@ import {
   Trash2, 
   MessageSquare,
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  Award,
+  Gift,
+  Star,
+  QrCode,
+  ThumbsUp,
+  ThumbsDown,
+  CreditCard,
+  ChevronRight,
+  Copy,
+  ZoomIn,
+  Heart,
+  ShieldCheck
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { useCrmUi } from '@/context/CrmUiContext';
 import { isContactInactive, getMexicoCityDateTime, PipelineStage, OpportunityDeal, ScheduledItem } from '@/lib/crm-domain';
+import ContactPhotoModal from '@/components/whatsapp/ContactPhotoModal';
+import { TIER_CONFIG } from '@/lib/loyalty-store';
 
 export default function CrmPanel({ phone }: { phone: string }) {
   const { toast } = useToast();
@@ -28,9 +42,10 @@ export default function CrmPanel({ phone }: { phone: string }) {
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [error, setError] = useState('');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
 
   // Form states
-  const [activeTab, setActiveTab] = useState<'info' | 'deals' | 'scheduled' | 'timeline' | 'orders'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'deals' | 'scheduled' | 'timeline' | 'orders' | 'loyalty'>('info');
   const [editName, setEditName] = useState('');
   const [newTagInput, setNewTagInput] = useState('');
   const [noteText, setNoteText] = useState('');
@@ -180,17 +195,46 @@ export default function CrmPanel({ phone }: { phone: string }) {
     <aside className="w-full h-full overflow-y-auto bg-slate-950/95 border-l border-white/5 text-slate-100 text-xs flex flex-col select-none">
       {/* Top Header Card */}
       <div className="p-4 border-b border-slate-800/80 bg-slate-900/40 shrink-0 space-y-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-slate-800 text-slate-200 flex items-center justify-center font-bold text-sm ring-1 ring-white/10 shrink-0">
-              {(context.contact.nombre || phone).slice(0, 2).toUpperCase()}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Enlarged Avatar with Click-to-Zoom */}
+            <div 
+              onClick={() => setIsPhotoModalOpen(true)}
+              title="Clic para ver foto en tamaño grande"
+              className="relative group cursor-pointer shrink-0"
+            >
+              <div className="w-14 h-14 rounded-2xl overflow-hidden bg-slate-800 ring-2 ring-emerald-500/30 group-hover:ring-emerald-400 transition-all shadow-md flex items-center justify-center">
+                {context.contact?.avatar ? (
+                  <img 
+                    src={context.contact.avatar} 
+                    alt={context.contact.nombre} 
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform" 
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900 font-extrabold text-base text-emerald-400">
+                    {(context.contact?.nombre || phone).slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+              </div>
+              <div className="absolute inset-0 rounded-2xl bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                <ZoomIn className="w-4 h-4 text-white drop-shadow" />
+              </div>
             </div>
-            <div className="min-w-0">
-              <h2 className="font-bold text-sm text-white truncate blur-sensitive">
-                {context.contact.nombre || 'Sin nombre'}
-              </h2>
+
+            <div className="min-w-0 space-y-1">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <h2 className="font-bold text-sm text-white truncate blur-sensitive">
+                  {context.contact?.nombre || 'Sin nombre'}
+                </h2>
+                {context.loyalty && (
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border ${context.loyalty.tierBadgeColor}`}>
+                    <Award className="w-2.5 h-2.5" />
+                    <span>Nivel {context.loyalty.tierName}</span>
+                  </span>
+                )}
+              </div>
               <p className="text-[11px] text-slate-400 blur-sensitive">
-                {context.contact.telefono}
+                {context.contact?.telefono || phone}
               </p>
             </div>
           </div>
@@ -277,6 +321,20 @@ export default function CrmPanel({ phone }: { phone: string }) {
           {(context.orders || []).length > 0 && (
             <span className="px-1.5 py-0.2 rounded-full bg-slate-800 text-[10px] text-amber-400 font-bold">
               {context.orders.length}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab('loyalty')}
+          className={`px-3 py-2.5 font-medium border-b-2 transition-all flex items-center gap-1.5 shrink-0 ${
+            activeTab === 'loyalty' ? 'border-amber-400 text-amber-400 font-bold' : 'border-transparent text-slate-400 hover:text-white'
+          }`}
+        >
+          <Gift className="w-3.5 h-3.5 text-amber-400" />
+          <span>Fidelidad & Reseñas</span>
+          {context.loyalty && (
+            <span className="px-1.5 py-0.2 rounded-full bg-amber-400/20 text-[10px] text-amber-300 font-bold">
+              {context.loyalty.currentPoints} pts
             </span>
           )}
         </button>
@@ -605,7 +663,279 @@ export default function CrmPanel({ phone }: { phone: string }) {
             </div>
           </div>
         )}
+        {/* TAB 6: Fidelidad & Encuestas ValoraCX */}
+        {activeTab === 'loyalty' && (
+          <div className="space-y-5">
+            {context.loyalty ? (
+              <>
+                {/* 1. Tarjeta Virtual de Cliente Frecuente (Digital Wallet Pass) */}
+                <div className={`p-4 rounded-2xl bg-gradient-to-br ${context.loyalty.tier === 'gold' ? 'from-amber-600/40 via-yellow-900/30 to-slate-900 border-amber-500/50 shadow-amber-500/10' : context.loyalty.tier === 'silver' ? 'from-slate-600/40 via-slate-800/30 to-slate-900 border-slate-400/50' : context.loyalty.tier === 'platinum' ? 'from-emerald-600/40 via-teal-900/30 to-slate-900 border-emerald-400/50 shadow-emerald-500/10' : 'from-amber-800/40 via-orange-950/30 to-slate-900 border-amber-700/50'} border shadow-xl relative overflow-hidden space-y-4`}>
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <CreditCard className="w-3.5 h-3.5 text-amber-400" />
+                        <span className="text-[10px] font-black tracking-wider uppercase text-amber-300">
+                          IMPERIA UNIFORMES
+                        </span>
+                      </div>
+                      <h3 className="font-extrabold text-sm text-white mt-0.5">
+                        Club de Fidelidad • Monedero
+                      </h3>
+                    </div>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${context.loyalty.tierBadgeColor}`}>
+                      Nivel {context.loyalty.tierName.toUpperCase()}
+                    </span>
+                  </div>
+
+                  <div className="flex items-baseline justify-between pt-1">
+                    <div>
+                      <span className="text-[9px] uppercase tracking-wider text-slate-400 block font-bold">
+                        Puntos Acumulados Disponibles
+                      </span>
+                      <p className="text-2xl font-black text-white tracking-tight">
+                        {context.loyalty.currentPoints} <span className="text-xs font-bold text-amber-400">PTS</span>
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[9px] uppercase tracking-wider text-slate-400 block font-bold">
+                        Histórico Total
+                      </span>
+                      <p className="text-xs font-mono font-bold text-slate-300">
+                        {context.loyalty.lifetimePoints} pts ganados
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-white/10 text-[10px]">
+                    <div className="flex items-center gap-1.5">
+                      <QrCode className="w-4 h-4 text-slate-400" />
+                      <span className="font-mono font-bold text-white tracking-wider">
+                        {context.loyalty.cardNumber}
+                      </span>
+                    </div>
+                    <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3" /> Tarjeta Activa
+                    </span>
+                  </div>
+                </div>
+
+                {/* 2. Reputación: Calificación en Google y en Encuesta Tienda */}
+                <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                      <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />
+                      <span>Reputación & Encuestas ValoraCX</span>
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
+                      {context.loyalty.hasGoodReviews ? 'Opiniones Positivas' : 'En seguimiento'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-center pt-1">
+                    {/* Google Reviews */}
+                    <a 
+                      href={context.loyalty.googleReviewUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-2.5 rounded-lg bg-white/[0.02] border border-white/5 hover:border-yellow-500/30 transition-colors block text-left group"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] text-slate-400 font-bold">Google Reviews</span>
+                        <ExternalLink className="w-3 h-3 text-slate-500 group-hover:text-yellow-400" />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />
+                        <span className="text-base font-black text-white">{context.loyalty.googleRating}.0</span>
+                        <span className="text-[10px] text-emerald-400 font-bold ml-auto">Verificado</span>
+                      </div>
+                      <p className="text-[9px] text-slate-400 mt-1">Calificado en Google Maps</p>
+                    </a>
+
+                    {/* Encuesta Física en Tienda */}
+                    <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/5 text-left">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] text-slate-400 font-bold">Encuestas Tienda</span>
+                        <Heart className="w-3 h-3 text-emerald-400" />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Star className="w-4 h-4 text-emerald-400 fill-emerald-400" />
+                        <span className="text-base font-black text-white">{context.loyalty.averageRating}</span>
+                        <span className="text-[10px] text-slate-400 ml-auto">{context.loyalty.totalReviews} eventos</span>
+                      </div>
+                      <p className="text-[9px] text-slate-400 mt-1">Promedio de satisfacción</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Beneficios Disponibles por Puntos Acumulados */}
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold text-white flex items-center gap-1.5 uppercase tracking-wide">
+                      <Gift className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Beneficios Disponibles ({context.loyalty.availableRewards.length})</span>
+                    </h4>
+                    <span className="text-[10px] text-emerald-400 font-medium">
+                      Canjeables en caja
+                    </span>
+                  </div>
+
+                  {context.loyalty.availableRewards.map((r: any) => (
+                    <div 
+                      key={r.id} 
+                      className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 space-y-2 relative"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <strong className="text-white text-xs block">{r.name}</strong>
+                          <p className="text-[10px] text-slate-300 mt-0.5">{r.description}</p>
+                        </div>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 shrink-0">
+                          {r.pointsRequired} pts
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-emerald-500/20 text-[10px]">
+                        <span className="font-mono text-emerald-300 font-bold">{r.code}</span>
+                        <button
+                          onClick={() => {
+                            if (r.code) {
+                              navigator.clipboard.writeText(`¡Hola! Tienes disponible tu beneficio del Club de Fidelidad Imperia: ${r.name}. Código de canje en caja: ${r.code}`);
+                              toast({
+                                title: "Beneficio copiado al portapapeles",
+                                description: `Código: ${r.code}. Listo para pegar y enviar en el chat.`
+                              });
+                            }
+                          }}
+                          className="flex items-center gap-1 text-emerald-400 hover:text-white font-semibold transition-colors"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>Copiar Cupón</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Siguiente Beneficio Bloqueado */}
+                  {context.loyalty.nextReward && (
+                    <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1.5 text-[11px]">
+                      <div className="flex items-center justify-between text-slate-400 text-[10px]">
+                        <span>Siguiente beneficio: <strong>{context.loyalty.nextReward.name}</strong></span>
+                        <span className="font-mono">{context.loyalty.nextReward.pointsRequired} pts</span>
+                      </div>
+                      <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                        <div 
+                          className="bg-amber-400 h-full transition-all duration-300"
+                          style={{ width: `${Math.min(100, Math.round((context.loyalty.currentPoints / context.loyalty.nextReward.pointsRequired) * 100))}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-amber-400/90 font-medium text-right">
+                        Faltan {context.loyalty.nextReward.missingPoints} pts para desbloquear
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* 4. Historial de Comentarios & Encuestas por Evento */}
+                <div className="space-y-3 pt-2">
+                  <h4 className="text-[11px] font-bold text-white flex items-center gap-1.5 uppercase tracking-wide">
+                    <MessageSquare className="w-3.5 h-3.5 text-sky-400" />
+                    <span>Historial de Visitas y Encuestas ({context.loyalty.feedbacks.length})</span>
+                  </h4>
+
+                  {context.loyalty.feedbacks.map((fb: any) => (
+                    <div 
+                      key={fb.id}
+                      className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2 text-xs"
+                    >
+                      <div className="flex items-center justify-between text-[10px] text-slate-400">
+                        <span className="font-semibold text-slate-300">{fb.branchName}</span>
+                        <span>{fb.date}</span>
+                      </div>
+
+                      {/* Estrellas y Google Status */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          {[1, 2, 3, 4, 5].map((s) => (
+                            <Star 
+                              key={s} 
+                              className={`w-3.5 h-3.5 ${s <= fb.rating ? 'text-yellow-400 fill-yellow-400' : 'text-slate-600'}`} 
+                            />
+                          ))}
+                          <span className="font-bold text-white ml-1 text-xs">{fb.rating}.0</span>
+                        </div>
+                        {fb.ratedOnGoogle && (
+                          <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-yellow-400/10 text-yellow-300 border border-yellow-400/20">
+                            ★ 5.0 en Google Maps
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Aspectos Positivos y Negativos */}
+                      <div className="space-y-1 text-[10px]">
+                        {fb.positiveAspects && fb.positiveAspects.length > 0 && (
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="text-emerald-400 font-bold flex items-center gap-0.5">
+                              <ThumbsUp className="w-2.5 h-2.5" /> Positivo:
+                            </span>
+                            {fb.positiveAspects.map((pos: string, pIdx: number) => (
+                              <span key={pIdx} className="px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/20">
+                                {pos}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {fb.negativeAspects && fb.negativeAspects.length > 0 ? (
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="text-red-400 font-bold flex items-center gap-0.5">
+                              <ThumbsDown className="w-2.5 h-2.5" /> A mejorar:
+                            </span>
+                            {fb.negativeAspects.map((neg: string, nIdx: number) => (
+                              <span key={nIdx} className="px-1.5 py-0.2 rounded bg-red-500/15 text-red-300 border border-red-500/20">
+                                {neg}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-slate-500 text-[10px]">Sin aspectos negativos reportados</span>
+                        )}
+                      </div>
+
+                      {/* Comentario Textual */}
+                      {fb.comment && (
+                        <p className="text-slate-200 text-xs italic bg-white/[0.02] p-2 rounded-lg border border-white/5 blur-sensitive">
+                          "{fb.comment}"
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="text-center py-8 text-slate-500">
+                <Gift className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                <p>Cargando información de fidelidad y encuestas...</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Modal Foto de Contacto en Grande & Lightbox */}
+      <ContactPhotoModal
+        isOpen={isPhotoModalOpen}
+        onClose={() => setIsPhotoModalOpen(false)}
+        contact={{
+          id: context.contact?.id || phone,
+          name: context.contact?.nombre || 'Sin nombre',
+          phone: context.contact?.telefono || phone,
+          avatar: context.contact?.avatar,
+          tags: context.tags || [],
+          status: context.contact?.status,
+          stage: context.stage,
+        }}
+        loyaltyProfile={context.loyalty}
+      />
     </aside>
   );
 }

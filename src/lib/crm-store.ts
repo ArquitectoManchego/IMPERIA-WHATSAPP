@@ -1,6 +1,7 @@
 import { database, legacyPath, crmPath } from './admin-db';
 import { phoneNumber, stableId, orderView, notificationFor, sameData, PipelineStage, OpportunityDeal, QuickReply, ScheduledItem, CampaignItem, AutomationRule, DEFAULT_STAGES } from './crm-domain';
 import { getMetadataState, updateMetadataState } from './crm-metadata-store';
+import { getCustomerLoyalty } from './loyalty-store';
 
 export const contactsRef = () => database().collection(`${crmPath}/contacts`);
 
@@ -20,6 +21,44 @@ export function invalidateContactsCache() {
   lastContactsCacheTime = 0;
 }
 
+export function extractInstitutionalTags(row: any): string[] {
+  const tags = new Set<string>();
+  const text = [
+    row.grupo_graduacion,
+    row.notas_extra,
+    ...(Array.isArray(row.articulos) ? row.articulos.map((a: any) => typeof a === 'string' ? a : (a?.descripcion || '')) : [])
+  ].filter(Boolean).join(' ').toUpperCase();
+
+  if (text.includes('UV') || text.includes('UNIVERSIDAD VERACRUZANA')) {
+    tags.add('Universidad Veracruzana');
+  }
+  if (text.includes('ENFRA') || text.includes('ENFERMERIA') || text.includes('ENFERMERÍA')) {
+    tags.add('Facultad de Enfermería');
+  }
+  if (text.includes('NUTRICION') || text.includes('NUTRICIÓN')) {
+    tags.add('Facultad de Nutrición');
+  }
+  if (text.includes('UNIVERSIDAD DE ORIENTE') || text.includes('#SOYUO') || text.includes(' UO')) {
+    tags.add('Universidad de Oriente');
+  }
+  if (text.includes('AMPARO DEL CASTILLO') || text.includes('AMPARO')) {
+    tags.add('Amparo del Castillo');
+  }
+  if (text.includes('CETUG')) {
+    tags.add('CETUG');
+  }
+  if (text.includes('IMSS')) {
+    tags.add('IMSS');
+  }
+  if (text.includes('SESVER')) {
+    tags.add('SESVER');
+  }
+  if (text.includes('CVC')) {
+    tags.add('CVC');
+  }
+  return Array.from(tags);
+}
+
 export function getLocalFallbackContacts(): any[] {
   try {
     const fs = require('fs');
@@ -37,6 +76,7 @@ export function getLocalFallbackContacts(): any[] {
         continue;
       }
       const id = stableId(normalized);
+      const rowTags = extractInstitutionalTags(row);
       if (!map.has(id)) {
         map.set(id, {
           id,
@@ -47,6 +87,7 @@ export function getLocalFallbackContacts(): any[] {
           nameConfirmed: !!row.nombre,
           notificationsConsent: false,
           googleSyncStatus: 'synced',
+          tags: rowTags,
           createdAt: row.createdAt?.seconds ? new Date(row.createdAt.seconds * 1000).toISOString() : new Date().toISOString(),
           updatedAt: row.updatedAt?.seconds ? new Date(row.updatedAt.seconds * 1000).toISOString() : new Date().toISOString()
         });
@@ -55,6 +96,9 @@ export function getLocalFallbackContacts(): any[] {
         if (!existing.nameConfirmed && row.nombre) {
           existing.nombre = row.nombre;
           existing.nameConfirmed = true;
+        }
+        if (rowTags.length > 0) {
+          existing.tags = Array.from(new Set([...(existing.tags || []), ...rowTags]));
         }
       }
     }
@@ -306,6 +350,11 @@ export async function contactContext(phone: string) {
     scheduled = metadata.scheduledItems.filter(s => s.contactId === contact.id);
   } catch (_) {}
 
+  let loyalty = null;
+  try {
+    loyalty = getCustomerLoyalty(phone, contact?.nombre, orders);
+  } catch (_) {}
+
   return {
     contact,
     orders,
@@ -315,6 +364,7 @@ export async function contactContext(phone: string) {
     tags,
     deals,
     scheduled,
+    loyalty,
   };
 }
 
