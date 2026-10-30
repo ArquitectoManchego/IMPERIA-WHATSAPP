@@ -53,9 +53,26 @@ export async function POST(req: Request) {
         }
 
         try {
-          const personalizedMsg = campaign.messageTemplate
-            .replace(/\{\{nombre\}\}/gi, r.name || 'Cliente')
-            .replace(/\{\{telefono\}\}/gi, r.phone);
+          let textForRecipient = campaign.messageTemplate;
+
+          // If AI Randomizer is enabled, apply paraphrasing with variable retention
+          if (campaign.aiRandomize) {
+            const greetings = ['¡Hola!', 'Buen día,', '¿Qué tal?', '¡Hola, qué tal!', 'Estimado/a,'];
+            const closings = [
+              'Cualquier duda quedamos a tus órdenes en Imperia. 😊',
+              'Avísanos si tienes preguntas y con gusto te atendemos. ✨',
+              'Estamos para servirte en todo momento. 👍',
+              '¡Que tengas un excelente día de parte del equipo Imperia! 👔'
+            ];
+            const g = greetings[Math.floor(Math.random() * greetings.length)];
+            const c = closings[Math.floor(Math.random() * closings.length)];
+            textForRecipient = `${g} ${textForRecipient.trim()} ${c}`;
+          }
+
+          const personalizedMsg = textForRecipient
+            .replace(/\{\{nombre\}\}|\{nombre\}/gi, r.name || 'Cliente')
+            .replace(/\{\{primer_nombre\}\}|\{primer_nombre\}/gi, (r.name || 'Cliente').split(' ')[0])
+            .replace(/\{\{telefono\}\}|\{telefono\}/gi, r.phone);
 
           await provider.sendMessage({
             chatId: r.phone.includes('@') ? r.phone : `${r.phone.replace(/\D/g, '')}@c.us`,
@@ -69,6 +86,12 @@ export async function POST(req: Request) {
             sentAt: new Date().toISOString(),
           });
           sentCount++;
+
+          // Anti-ban delay between sends
+          const minDelay = (campaign.delayMinSeconds || 3) * 1000;
+          const maxDelay = (campaign.delayMaxSeconds || 8) * 1000;
+          const randomDelay = Math.floor(minDelay + Math.random() * (maxDelay - minDelay));
+          await new Promise(resolve => setTimeout(resolve, randomDelay));
         } catch (err: any) {
           updatedRecipients.push({
             ...r,

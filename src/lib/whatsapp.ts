@@ -254,11 +254,11 @@ export const sendMessage = async (
   message: string, 
   mediaBase64?: string, 
   fallbackPhone?: string,
-  options?: { isSticker?: boolean; isGif?: boolean }
+  options?: { isSticker?: boolean; isGif?: boolean; isPtt?: boolean }
 ) => {
   addLog(`Enviando mensaje a ${chatId}...`);
   
-  const debounceKey = `${chatId}:${(message || '').trim()}:${options?.isSticker ? 'sticker' : (options?.isGif ? 'gif' : (mediaBase64 ? 'media' : 'text'))}:${mediaBase64 ? mediaBase64.slice(-30) : ''}`;
+  const debounceKey = `${chatId}:${(message || '').trim()}:${options?.isSticker ? 'sticker' : (options?.isGif ? 'gif' : (options?.isPtt ? 'ptt' : (mediaBase64 ? 'media' : 'text')))}:${mediaBase64 ? mediaBase64.slice(-30) : ''}`;
   const now = Date.now();
   const cachedSend = recentSends.get(debounceKey);
   if (cachedSend && (now - cachedSend.time) < 3000) {
@@ -287,13 +287,14 @@ export const sendMessage = async (
 
       const isHttpUrl = mediaBase64.startsWith('http://') || mediaBase64.startsWith('https://');
       if (isHttpUrl) {
-        const endpoint = options?.isSticker ? 'send-sticker' : (options?.isGif ? 'send-video' : 'send-image');
+        const endpoint = options?.isSticker ? 'send-sticker' : (options?.isGif ? 'send-video' : (options?.isPtt ? 'send-voice' : 'send-image'));
         return await axios.post(
           `${baseURL}/sessions/${sessionId}/messages/${endpoint}`,
           {
             chatId: target,
             url: mediaBase64,
-            caption: options?.isSticker ? undefined : (message || undefined)
+            caption: options?.isSticker ? undefined : (message || undefined),
+            ...(options?.isPtt ? { isPtt: true, ptt: true } : {})
           },
           { headers: getHeaders(), timeout: 30000 }
         );
@@ -316,8 +317,8 @@ export const sendMessage = async (
       } else if (mimetype.startsWith('video/')) {
         endpoint = 'send-video';
         extension = mimetype.split('/')[1] || 'mp4';
-      } else if (mimetype.startsWith('audio/')) {
-        endpoint = 'send-audio';
+      } else if (mimetype.startsWith('audio/') || options?.isPtt) {
+        endpoint = options?.isPtt ? 'send-voice' : 'send-audio';
         extension = mimetype.split('/')[1] || 'mp3';
       } else if (mimetype.startsWith('image/')) {
         endpoint = 'send-image';
@@ -327,7 +328,7 @@ export const sendMessage = async (
         extension = 'bin';
       }
 
-      const payload = {
+      const payload: any = {
         chatId: target,
         base64: cleanBase64,
         mimetype,
@@ -335,7 +336,12 @@ export const sendMessage = async (
         filename: `attachment_${Date.now()}.${extension}`
       };
 
-      addLog(`Enviando ${endpoint} (${mimetype}) a ${target}...`);
+      if (options?.isPtt) {
+        payload.isPtt = true;
+        payload.ptt = true;
+      }
+
+      addLog(`Enviando ${endpoint} (${mimetype}${options?.isPtt ? ' [PTT Voice Note]' : ''}) a ${target}...`);
       return await axios.post(
         `${baseURL}/sessions/${sessionId}/messages/${endpoint}`,
         payload,

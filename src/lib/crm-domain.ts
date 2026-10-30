@@ -120,6 +120,9 @@ export interface QuickReply {
   mediaType?: 'text' | 'image' | 'audio' | 'video' | 'document';
   mediaBase64?: string;
   mediaUrl?: string;
+  actionStage?: string;
+  actionTag?: string;
+  isPtt?: boolean;
 }
 
 export interface ScheduledItem {
@@ -144,6 +147,9 @@ export interface CampaignItem {
   status: 'draft' | 'scheduled' | 'running' | 'completed' | 'paused' | 'cancelled';
   messageTemplate: string;
   mediaBase64?: string;
+  aiRandomize?: boolean;
+  delayMinSeconds?: number;
+  delayMaxSeconds?: number;
   recipients: Array<{
     phone: string;
     name?: string;

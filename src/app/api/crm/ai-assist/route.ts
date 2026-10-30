@@ -21,6 +21,8 @@ export async function POST(req: Request) {
           prompt = `Eres un redactor comercial experto en atención al cliente para WhatsApp en México (tienda de confección y uniformes IMPERIA). Reescribe el siguiente mensaje para que suene profesional, amable, claro y persuasivo. Conserva emojis adecuados. Devuelve únicamente el texto mejorado:\n\n"${text}"`;
         } else if (action === 'sales') {
           prompt = `Eres un asesor de ventas de alto cierre en WhatsApp para IMPERIA (uniformes y ropa formal). Redacta una respuesta de venta atractiva y empática con llamado a la acción claro basada en este mensaje o contexto:\n\n"${text}"`;
+        } else if (action === 'randomize') {
+          prompt = `Eres un asistente de WhatsApp para IMPERIA Uniformes. Parafrasea el siguiente mensaje para que transmita exactamente la misma idea y oferta comercial, pero con una redacción diferente, variando el saludo, conectores y emojis, de forma natural en español mexicano. Mantén intactas cualquier etiqueta entre llaves como {nombre}, {primer_nombre}, {telefono}, {tarjeta}, {puntos}. Devuelve ÚNICAMENTE el texto generado sin comillas ni explicaciones:\n\n"${text}"`;
         } else if (action === 'translate') {
           prompt = `Traduce el siguiente texto al idioma ${targetLang === 'pt' ? 'portugués' : targetLang === 'en' ? 'inglés' : 'español'}. Devuelve únicamente la traducción:\n\n"${text}"`;
         } else if (action === 'summarize') {
@@ -54,6 +56,17 @@ export async function POST(req: Request) {
         aiResult = `¡Hola! Con mucho gusto te apoyamos. ${cleaned} Quedamos a tu entera disposición ante cualquier duda o detalle. 😊✨`;
       } else if (action === 'sales') {
         aiResult = `¡Hola! Muchas gracias por tu interés en nuestras prendas de IMPERIA. Contamos con confección de la más alta calidad y facilidades de pago. ¿Te gustaría que apartemos tu pedido o prefieres agendar una cita para toma de medidas esta semana? 👔👗`;
+      } else if (action === 'randomize') {
+        const greetings = ['¡Hola!', 'Buen día,', '¿Qué tal?', '¡Hola, qué tal!', 'Estimado/a,'];
+        const closings = [
+          'Cualquier duda quedamos a tus órdenes en Imperia. 😊',
+          'Avísanos si tienes preguntas y con gusto te atendemos. ✨',
+          'Estamos para servirte en todo momento. 👍',
+          '¡Que tengas un excelente día de parte del equipo Imperia! 👔'
+        ];
+        const g = greetings[Math.floor(Math.random() * greetings.length)];
+        const c = closings[Math.floor(Math.random() * closings.length)];
+        aiResult = `${g} ${text.trim()} ${c}`;
       } else if (action === 'translate') {
         if (targetLang === 'en') {
           aiResult = `Hello! Thank you for contacting IMPERIA. We are delighted to assist you with your order. Let us know how we can help!`;

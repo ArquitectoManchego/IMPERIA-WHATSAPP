@@ -37,6 +37,9 @@ export default function CampaignsPage() {
   const [targetTag, setTargetTag] = useState('all');
   const [onlyInactive, setOnlyInactive] = useState(false);
   const [customCsvRecipients, setCustomCsvRecipients] = useState<Array<{ phone: string; name?: string }>>([]);
+  const [aiRandomize, setAiRandomize] = useState(true);
+  const [delayMinSeconds, setDelayMinSeconds] = useState(4);
+  const [delayMaxSeconds, setDelayMaxSeconds] = useState(10);
   const [executingId, setExecutingId] = useState<string | null>(null);
 
   const loadData = async () => {
@@ -129,13 +132,16 @@ export default function CampaignsPage() {
             name: campaignName.trim(),
             messageTemplate: messageTemplate.trim(),
             status: 'draft',
+            aiRandomize,
+            delayMinSeconds,
+            delayMaxSeconds,
             recipients: calculatedRecipients.map(r => ({ ...r, status: 'pending' })),
           }
         }),
       });
 
       if (!res.ok) throw new Error('Error al guardar campaña');
-      toast({ title: 'Campaña creada exitosamente' });
+      toast({ title: 'Campaña creada exitosamente con protección Anti-Baneo' });
       setIsCreating(false);
       setCampaignName('');
       setMessageTemplate('');
@@ -276,28 +282,80 @@ export default function CampaignsPage() {
 
               {/* Message template */}
               <div>
-                <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center justify-between mb-1.5 flex-wrap gap-2">
                   <label className="text-xs font-semibold text-slate-400 uppercase">
                     Plantilla del Mensaje
                   </label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setMessageTemplate(prev => prev + ' {{nombre}}')}
-                      className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-sky-400 hover:bg-slate-700"
-                    >
-                      + Variable {`{{nombre}}`}
-                    </button>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {['{nombre}', '{primer_nombre}', '{telefono}', '{puntos}'].map(tag => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => setMessageTemplate(prev => `${prev} ${tag}`)}
+                        className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-sky-400 hover:bg-slate-700 font-mono"
+                      >
+                        + {tag}
+                      </button>
+                    ))}
                   </div>
                 </div>
                 <textarea
                   required
-                  rows={5}
-                  placeholder="¡Hola {{nombre}}! Te contactamos de IMPERIA con una gran noticia..."
+                  rows={4}
+                  placeholder="¡Hola {primer_nombre}! Te contactamos de IMPERIA con una gran noticia..."
                   value={messageTemplate}
                   onChange={e => setMessageTemplate(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-emerald-500 font-sans leading-relaxed"
                 />
+              </div>
+
+              {/* Anti-Ban & AI Protection Settings */}
+              <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <div>
+                      <h4 className="text-xs font-bold text-white">Protección Anti-Baneo con IA (Gemini)</h4>
+                      <p className="text-[11px] text-slate-400">Parafrasea automáticamente el texto para cada contacto evitando filtros de spam</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAiRandomize(!aiRandomize)}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all ${
+                      aiRandomize
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                        : 'bg-slate-900 text-slate-400 border-slate-800'
+                    }`}
+                  >
+                    {aiRandomize ? '✓ IA Activa' : 'Desactivada'}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t border-slate-800/60">
+                  <div>
+                    <label className="block text-[11px] text-slate-400 mb-1">Pausa mínima entre envíos (segundos):</label>
+                    <input
+                      type="number"
+                      min={2}
+                      max={30}
+                      value={delayMinSeconds}
+                      onChange={e => setDelayMinSeconds(parseInt(e.target.value) || 2)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-slate-400 mb-1">Pausa máxima aleatoria (segundos):</label>
+                    <input
+                      type="number"
+                      min={delayMinSeconds}
+                      max={60}
+                      value={delayMaxSeconds}
+                      onChange={e => setDelayMaxSeconds(parseInt(e.target.value) || 5)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Live Preview Box */}
@@ -305,7 +363,9 @@ export default function CampaignsPage() {
                 <div className="p-3.5 rounded-xl bg-slate-950/70 border border-emerald-500/30 space-y-1">
                   <p className="text-[10px] uppercase font-bold text-emerald-400">Vista previa personalizada:</p>
                   <p className="text-xs text-slate-200 whitespace-pre-wrap">
-                    {messageTemplate.replace(/\{\{nombre\}\}/gi, calculatedRecipients[0]?.name || 'Carlos')}
+                    {messageTemplate
+                      .replace(/\{\{nombre\}\}|\{nombre\}/gi, calculatedRecipients[0]?.name || 'Carlos')
+                      .replace(/\{\{primer_nombre\}\}|\{primer_nombre\}/gi, (calculatedRecipients[0]?.name || 'Carlos').split(' ')[0])}
                   </p>
                 </div>
               )}

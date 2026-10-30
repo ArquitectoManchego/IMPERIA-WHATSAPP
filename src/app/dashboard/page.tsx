@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Search, 
   MoreVertical, 
@@ -28,7 +28,12 @@ import {
   UserCheck,
   Award,
   ZoomIn,
-  Check
+  Check,
+  Eye,
+  EyeOff,
+  Radio,
+  Layers,
+  Mic
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -41,6 +46,8 @@ import QuickRepliesModal from '@/components/whatsapp/QuickRepliesModal';
 import AiAssistantModal from '@/components/whatsapp/AiAssistantModal';
 import EmojiGifStickerPicker from '@/components/whatsapp/EmojiGifStickerPicker';
 import ContactPhotoModal from '@/components/whatsapp/ContactPhotoModal';
+import VoiceNoteRecorder from '@/components/whatsapp/VoiceNoteRecorder';
+import ScheduleMessageModal, { ScheduledMessage } from '@/components/whatsapp/ScheduleMessageModal';
 
 export default function DashboardPage() {
   const { toast } = useToast();
@@ -57,6 +64,51 @@ export default function DashboardPage() {
   const [showMobileCrm, setShowMobileCrm] = useState(false);
   const [isChatPhotoModalOpen, setIsChatPhotoModalOpen] = useState(false);
   const [selectedChatLoyalty, setSelectedChatLoyalty] = useState<any>(null);
+
+  // New features: Quick Tabs, Privacy Blur, Agent Signature, Scheduled Messages
+  type ChatTab = 'todos' | 'no_leidos' | 'con_pedidos' | 'fidelidad' | 'grupos' | 'sin_responder';
+  const [activeTab, setActiveTab] = useState<ChatTab>('todos');
+  const [privacyBlur, setPrivacyBlur] = useState<boolean>(false);
+  const [isSignatureEnabled, setIsSignatureEnabled] = useState<boolean>(false);
+  const [agentSignature, setAgentSignature] = useState<string>('— Imperia Uniformes');
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState<boolean>(false);
+  const [scheduledMessages, setScheduledMessages] = useState<ScheduledMessage[]>([]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedBlur = localStorage.getItem('imperia_privacy_blur');
+      if (savedBlur === 'true') setPrivacyBlur(true);
+
+      const savedSigEnabled = localStorage.getItem('imperia_agent_signature_enabled');
+      if (savedSigEnabled === 'true') setIsSignatureEnabled(true);
+
+      const savedSig = localStorage.getItem('imperia_agent_signature');
+      if (savedSig) setAgentSignature(savedSig);
+
+      try {
+        const savedSched = localStorage.getItem('imperia_scheduled_messages');
+        if (savedSched) setScheduledMessages(JSON.parse(savedSched));
+      } catch (_) {}
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && scheduledMessages.length > 0) {
+      localStorage.setItem('imperia_scheduled_messages', JSON.stringify(scheduledMessages));
+    }
+  }, [scheduledMessages]);
+
+  // Compute tab counts
+  const tabCounts = useMemo(() => {
+    return {
+      todos: clients.length,
+      no_leidos: clients.filter(c => (c.unreadCount && c.unreadCount > 0) || c.unread).length,
+      con_pedidos: clients.filter(c => (Array.isArray(c.orders) && c.orders.length > 0) || c.hasOrders).length,
+      fidelidad: clients.filter(c => c.loyalty || c.loyaltyTier || (Array.isArray(c.tags) && c.tags.some((t: string) => t.toLowerCase().includes('vip') || t.toLowerCase().includes('lealtad') || t.toLowerCase().includes('frecuente')))).length,
+      grupos: clients.filter(c => (c.id && c.id.includes('@g.us')) || c.isGroup).length,
+      sin_responder: clients.filter(c => (c.unreadCount > 0) || c.needsReply || (c.lastMessage && !c.fromMe && !c.hasReplied)).length,
+    };
+  }, [clients]);
 
   // Compute available tags with counts
   const availableTags = React.useMemo(() => {
@@ -76,11 +128,24 @@ export default function DashboardPage() {
       .map(([name, count]) => ({ name, count }));
   }, [clients]);
 
-  // Stackable multi-tag filter (AND logic: client must have ALL selected tags)
+  // Stackable multi-tag filter (AND logic) + Quick Tabs Filter
   const filteredClients = React.useMemo(() => {
     const search = searchTerm.toLowerCase().trim();
 
     return clients.filter(c => {
+      // Quick Tab Filter
+      if (activeTab === 'no_leidos') {
+        if (!((c.unreadCount && c.unreadCount > 0) || c.unread)) return false;
+      } else if (activeTab === 'con_pedidos') {
+        if (!((Array.isArray(c.orders) && c.orders.length > 0) || c.hasOrders)) return false;
+      } else if (activeTab === 'fidelidad') {
+        if (!(c.loyalty || c.loyaltyTier || (Array.isArray(c.tags) && c.tags.some((t: string) => t.toLowerCase().includes('vip') || t.toLowerCase().includes('lealtad') || t.toLowerCase().includes('frecuente'))))) return false;
+      } else if (activeTab === 'grupos') {
+        if (!((c.id && c.id.includes('@g.us')) || c.isGroup)) return false;
+      } else if (activeTab === 'sin_responder') {
+        if (!((c.unreadCount > 0) || c.needsReply || (c.lastMessage && !c.fromMe && !c.hasReplied))) return false;
+      }
+
       // Search term filter
       const matchesSearch = !search || 
         (c.name || '').toLowerCase().includes(search) ||
@@ -94,7 +159,7 @@ export default function DashboardPage() {
 
       return matchesSearch && matchesTags;
     });
-  }, [searchTerm, selectedTags, clients]);
+  }, [searchTerm, selectedTags, activeTab, clients]);
 
   const [messageText, setMessageText] = useState('');
   const [sending, setSending] = useState(false);
@@ -436,11 +501,60 @@ export default function DashboardPage() {
     window.open('/api/whatsapp/sync-history?export=true', '_blank');
   };
 
-  const handleSendMessage = async () => {
+  // Background checker for scheduled messages (runs every 15 seconds)
+  useEffect(() => {
+    const checkScheduled = async () => {
+      const now = Date.now();
+      const pending = scheduledMessages.filter(s => s.status === 'pending');
+      for (const msg of pending) {
+        if (new Date(msg.scheduledTime).getTime() <= now) {
+          setScheduledMessages(prev => prev.map(m => m.id === msg.id ? { ...m, status: 'sent' } : m));
+          try {
+            const res = await fetch('/api/whatsapp/send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chatId: msg.chatId,
+                phone: msg.phone,
+                message: msg.message
+              })
+            });
+            if (res.ok) {
+              toast({
+                title: 'Mensaje Programado Enviado',
+                description: `Enviado a ${msg.contactName || msg.phone}: "${msg.message.slice(0, 35)}..."`,
+              });
+              if (selectedChat?.id === msg.chatId) {
+                fetchMessages(true);
+              }
+            }
+          } catch (e: any) {
+            toast({
+              title: 'Error al enviar mensaje programado',
+              description: e.message,
+              variant: 'destructive'
+            });
+          }
+        }
+      }
+    };
+
+    const timer = setInterval(checkScheduled, 15000);
+    return () => clearInterval(timer);
+  }, [scheduledMessages, selectedChat]);
+
+  const handleSendMessage = async (customText?: string) => {
     if (sendingRef.current || sending || !selectedChat) return;
-    const textToSend = messageText.trim();
+    let textToSend = (customText !== undefined ? customText : messageText).trim();
     const mediaToSend = attachment;
     if (!textToSend && !mediaToSend) return;
+
+    // Apply agent signature if enabled
+    if (isSignatureEnabled && agentSignature.trim() && textToSend) {
+      if (!textToSend.endsWith(agentSignature.trim())) {
+        textToSend = `${textToSend}\n\n${agentSignature.trim()}`;
+      }
+    }
 
     sendingRef.current = true;
     setSending(true);
@@ -504,6 +618,102 @@ export default function DashboardPage() {
     } finally {
       setSending(false);
       sendingRef.current = false;
+    }
+  };
+
+  const handleSendVoiceNote = async (audioBase64: string, isPtt = true) => {
+    if (!selectedChat || sendingRef.current) return;
+
+    sendingRef.current = true;
+    setSending(true);
+
+    const tempId = `temp_audio_${Date.now()}`;
+    const optimisticMsg = {
+      id: tempId,
+      body: '',
+      mediaUrl: audioBase64,
+      fromMe: true,
+      timestamp: Math.floor(Date.now() / 1000),
+      hasMedia: true,
+      type: 'audio'
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+
+    try {
+      const targetId = (selectedChat.id && selectedChat.id.includes('@'))
+        ? selectedChat.id
+        : (selectedChat.phone || selectedChat.id);
+
+      const response = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: targetId,
+          phone: selectedChat.phone,
+          mediaBase64: audioBase64,
+          isPtt: true
+        })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        toast({
+          title: "Nota de Voz Entregada (PTT)",
+          description: `Audio en vivo enviado a ${selectedChat.name || selectedChat.phone || targetId}`,
+        });
+        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: result.messageId || m.id } : m));
+        setTimeout(() => fetchMessages(true), 500);
+      } else {
+        throw new Error(result.error || 'Error al enviar audio');
+      }
+    } catch (err: any) {
+      toast({
+        title: "Error al enviar nota de voz",
+        description: err.message || "No se pudo entregar el audio.",
+        variant: "destructive"
+      });
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+    } finally {
+      setSending(false);
+      sendingRef.current = false;
+    }
+  };
+
+  const handleSelectQuickReply = async (
+    text: string, 
+    sendImmediately = false, 
+    action?: { stage?: string; tag?: string }
+  ) => {
+    if (action?.stage && selectedChat) {
+      try {
+        await fetch('/api/crm/contact', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone: selectedChat.phone || selectedChat.id,
+            stage: action.stage
+          })
+        });
+        setSelectedChat((prev: any) => prev ? { ...prev, stage: action.stage } : prev);
+        setClients((prev: any[]) => prev.map(c => c.id === selectedChat.id ? { ...c, stage: action.stage } : c));
+        toast({ title: 'Etapa CRM Actualizada', description: `Contacto movido a: ${action.stage}` });
+      } catch (_) {}
+    }
+
+    if (action?.tag && selectedChat) {
+      const currentTags = Array.isArray(selectedChat.tags) ? selectedChat.tags : [];
+      if (!currentTags.includes(action.tag)) {
+        const nextTags = [...currentTags, action.tag];
+        setSelectedChat((prev: any) => prev ? { ...prev, tags: nextTags } : prev);
+        setClients((prev: any[]) => prev.map(c => c.id === selectedChat.id ? { ...c, tags: nextTags } : c));
+        toast({ title: 'Etiqueta Asignada', description: `+ ${action.tag}` });
+      }
+    }
+
+    if (sendImmediately) {
+      handleSendMessage(text);
+    } else {
+      setMessageText(prev => prev ? `${prev} ${text}` : text);
     }
   };
 
@@ -702,6 +912,19 @@ export default function DashboardPage() {
               <Button 
                 size="icon" 
                 variant="ghost" 
+                title={privacyBlur ? "Modo Privacidad Activo (Anti-espía) - Clic para desactivar" : "Activar Modo Privacidad (Anti-espía)"}
+                onClick={() => {
+                  const next = !privacyBlur;
+                  setPrivacyBlur(next);
+                  localStorage.setItem('imperia_privacy_blur', String(next));
+                }}
+                className={cn("rounded-xl transition-all h-9 w-9", privacyBlur ? "bg-amber-500/20 text-amber-400 border border-amber-500/40" : "hover:bg-white/5 text-slate-400")}
+              >
+                {privacyBlur ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </Button>
+              <Button 
+                size="icon" 
+                variant="ghost" 
                 onClick={() => setShowDebug(!showDebug)}
                 className={cn("rounded-xl transition-all h-9 w-9", showDebug ? "bg-emerald-500/20 text-emerald-500" : "hover:bg-white/5 text-slate-400")}
               >
@@ -719,6 +942,40 @@ export default function DashboardPage() {
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full h-12 bg-white/5 border border-white/5 rounded-2xl pl-12 pr-4 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500/50 transition-all font-medium"
             />
+          </div>
+
+          {/* Quick Filter Tabs (Estilo MI CIERRO: Todos, No leídos, Con Pedidos, Fidelidad VIP, Grupos, Sin Responder) */}
+          <div className="flex gap-1 overflow-x-auto pb-1 pt-2 custom-scrollbar">
+            {[
+              { id: 'todos', label: 'Todos', count: tabCounts.todos },
+              { id: 'no_leidos', label: 'No leídos', count: tabCounts.no_leidos },
+              { id: 'con_pedidos', label: 'Con Pedidos', count: tabCounts.con_pedidos },
+              { id: 'fidelidad', label: 'Fidelidad VIP', count: tabCounts.fidelidad },
+              { id: 'grupos', label: 'Grupos', count: tabCounts.grupos },
+              { id: 'sin_responder', label: 'Sin Responder', count: tabCounts.sin_responder },
+            ].map((tab) => {
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={cn(
+                    "px-2.5 py-1 rounded-xl text-[10px] font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 shrink-0 border",
+                    isActive
+                      ? "bg-emerald-500 text-slate-950 border-emerald-400 shadow-sm font-bold"
+                      : "bg-white/5 hover:bg-white/10 text-slate-400 border-white/5"
+                  )}
+                >
+                  <span>{tab.label}</span>
+                  <span className={cn(
+                    "px-1 py-0.2 rounded-full text-[9px] font-mono",
+                    isActive ? "bg-slate-950/30 text-white" : "bg-white/10 text-slate-400"
+                  )}>
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           {/* Stackable Tag Filter Pills (AND logic) */}
@@ -874,7 +1131,10 @@ export default function DashboardPage() {
                     setIsChatPhotoModalOpen(true);
                   }}
                   title="Clic para ver foto ampliada"
-                  className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center border border-white/10 shrink-0 overflow-hidden relative cursor-pointer group/avatar hover:ring-2 hover:ring-emerald-400 transition-all shadow-inner"
+                  className={cn(
+                    "w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center border border-white/10 shrink-0 overflow-hidden relative cursor-pointer group/avatar hover:ring-2 hover:ring-emerald-400 transition-all shadow-inner",
+                    privacyBlur && "filter blur-md grayscale group-hover:filter-none group-hover:grayscale-0 transition-all duration-200"
+                  )}
                 >
                   {chat.avatar ? (
                     <img src={chat.avatar} alt={chat.name} className="w-full h-full object-cover group-hover/avatar:scale-110 transition-transform" />
@@ -890,10 +1150,18 @@ export default function DashboardPage() {
                 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-0.5">
-                    <h3 className="font-bold text-white truncate text-sm blur-sensitive">{chat.name || 'Sin Nombre'}</h3>
+                    <h3 className={cn(
+                      "font-bold text-white truncate text-sm transition-all duration-200",
+                      privacyBlur && "filter blur-[6px] select-none group-hover:filter-none"
+                    )}>
+                      {chat.name || 'Sin Nombre'}
+                    </h3>
                     <span className="text-[9px] font-black text-slate-500 uppercase tracking-tighter shrink-0">{chat.status}</span>
                   </div>
-                  <p className="text-[11px] text-slate-500 truncate leading-tight font-medium blur-sensitive">
+                  <p className={cn(
+                    "text-[11px] text-slate-500 truncate leading-tight font-medium transition-all duration-200",
+                    privacyBlur && "filter blur-[5px] select-none group-hover:filter-none"
+                  )}>
                     {chat.phone}
                   </p>
                   {/* Tag chips on contact */}
@@ -960,15 +1228,29 @@ export default function DashboardPage() {
 
                 <div className="min-w-0 space-y-0.5">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-bold text-white tracking-tight blur-sensitive truncate">{selectedChat.name || 'Selecciona un chat'}</h3>
+                    <h3 className={cn(
+                      "font-bold text-white tracking-tight truncate transition-all duration-200",
+                      privacyBlur && "filter blur-[6px] select-none hover:filter-none"
+                    )}>
+                      {selectedChat.name || 'Selecciona un chat'}
+                    </h3>
                     {selectedChatLoyalty && (
                       <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${selectedChatLoyalty.tierBadgeColor}`}>
                         Nivel {selectedChatLoyalty.tierName} • {selectedChatLoyalty.currentPoints} pts
                       </span>
                     )}
+                    {scheduledMessages.filter(s => s.status === 'pending' && (s.chatId === selectedChat.id || s.phone === selectedChat.phone)).length > 0 && (
+                      <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full text-[9px] font-black flex items-center gap-1 shrink-0">
+                        <Clock className="w-2.5 h-2.5 animate-pulse" />
+                        {scheduledMessages.filter(s => s.status === 'pending' && (s.chatId === selectedChat.id || s.phone === selectedChat.phone)).length} prog.
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-[10px] text-slate-400 font-mono blur-sensitive">
+                    <p className={cn(
+                      "text-[10px] text-slate-400 font-mono transition-all duration-200",
+                      privacyBlur && "filter blur-[5px] select-none hover:filter-none"
+                    )}>
                       {selectedChat.phone || selectedChat.id}
                     </p>
                     {selectedChat.id.includes('@g.us') && (
@@ -1091,6 +1373,8 @@ export default function DashboardPage() {
                       {filteredMessages.map((msg, idx) => {
                         const isSticker = msg.type === 'sticker' || msg.isSticker;
                         const isGif = msg.isGif;
+                        const isAudio = msg.type === 'audio' || msg.isPtt || msg.type === 'ptt' || (typeof msg.mediaUrl === 'string' && (msg.mediaUrl.startsWith('data:audio') || msg.mediaUrl.endsWith('.ogg') || msg.mediaUrl.endsWith('.mp3') || msg.mediaUrl.endsWith('.wav') || msg.mediaUrl.endsWith('.m4a')));
+
                         return (
                           <div 
                             key={msg.id || idx} 
@@ -1101,7 +1385,10 @@ export default function DashboardPage() {
                                 <img 
                                   src={msg.mediaUrl || msg.body} 
                                   alt="Sticker" 
-                                  className="w-36 h-36 sm:w-44 sm:h-44 object-contain drop-shadow-md select-none transition-transform hover:scale-105" 
+                                  className={cn(
+                                    "w-36 h-36 sm:w-44 sm:h-44 object-contain drop-shadow-md select-none transition-transform hover:scale-105",
+                                    privacyBlur && "filter blur-[8px] select-none hover:filter-none transition-all duration-200"
+                                  )}
                                 />
                                 <div className="text-[9px] mt-1 px-1.5 py-0.5 rounded bg-black/40 text-slate-300 font-bold backdrop-blur-sm">
                                   {msg.timestamp ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
@@ -1113,8 +1400,27 @@ export default function DashboardPage() {
                                   ? 'bg-emerald-500 text-white rounded-tr-none shadow-emerald-900/20' 
                                   : 'bg-white/5 text-slate-200 border border-white/5 rounded-tl-none shadow-black/20'
                               }`}>
-                                {msg.mediaUrl ? (
-                                  <div className="relative mb-2 rounded-xl overflow-hidden max-h-60 border border-white/10 shadow-md">
+                                {isAudio ? (
+                                  <div className="flex items-center gap-3 py-1 min-w-[200px] sm:min-w-[250px]">
+                                    <div className={cn(
+                                      "w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-sm",
+                                      msg.fromMe ? "bg-white/20 text-white" : "bg-emerald-500/20 text-emerald-400"
+                                    )}>
+                                      <Mic className="w-4 h-4 animate-pulse" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <audio 
+                                        controls 
+                                        src={msg.mediaUrl} 
+                                        className="w-full h-8 opacity-90 rounded" 
+                                      />
+                                    </div>
+                                  </div>
+                                ) : msg.mediaUrl ? (
+                                  <div className={cn(
+                                    "relative mb-2 rounded-xl overflow-hidden max-h-60 border border-white/10 shadow-md",
+                                    privacyBlur && "filter blur-[8px] select-none hover:filter-none transition-all duration-200"
+                                  )}>
                                     <img src={msg.mediaUrl} alt="Adjunto" className="w-full h-full object-cover" />
                                     {isGif && (
                                       <span className="absolute bottom-2 left-2 px-2 py-0.5 bg-black/70 text-white text-[10px] font-black rounded-md tracking-wider">
@@ -1128,7 +1434,14 @@ export default function DashboardPage() {
                                     <span>Imagen</span>
                                   </div>
                                 ) : null}
-                                {msg.body && <div className="blur-sensitive whitespace-pre-wrap">{msg.body}</div>}
+                                {msg.body && (
+                                  <div className={cn(
+                                    "whitespace-pre-wrap transition-all duration-200",
+                                    privacyBlur && "filter blur-[6px] select-none hover:filter-none"
+                                  )}>
+                                    {msg.body}
+                                  </div>
+                                )}
                                 <div className={`text-[9px] mt-2 opacity-50 ${msg.fromMe ? 'text-right' : 'text-left'} font-bold`}>
                                    {msg.timestamp ? new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                                 </div>
@@ -1143,7 +1456,52 @@ export default function DashboardPage() {
               )}
             </div>
 
-            <footer className="p-3 sm:p-6 md:p-8 glass z-20 border-t border-white/5 shrink-0 relative">
+            <footer className="p-3 sm:p-5 md:p-6 glass z-20 border-t border-white/5 shrink-0 relative">
+              {/* Agent Signature Bar */}
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/5 text-[11px] text-slate-400">
+                <div className="flex items-center gap-2 min-w-0">
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      const next = !isSignatureEnabled;
+                      setIsSignatureEnabled(next);
+                      if (typeof window !== 'undefined') {
+                        localStorage.setItem('agent_signature_enabled', next ? 'true' : 'false');
+                      }
+                    }}
+                    className={cn(
+                      "px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 shrink-0",
+                      isSignatureEnabled 
+                        ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm" 
+                        : "bg-white/5 text-slate-500 hover:text-slate-400 border border-white/5"
+                    )}
+                    title="Activar/Desactivar firma de asesor al final de los mensajes"
+                  >
+                    ✍️ {isSignatureEnabled ? 'Firma Activa' : 'Sin Firma'}
+                  </button>
+                  {isSignatureEnabled && (
+                    <span className="text-slate-400 italic font-mono text-[10px] truncate max-w-[200px] sm:max-w-xs">
+                      &quot;{agentSignature}&quot;
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newSig = window.prompt("Escribe tu nombre o firma de asesor comercial:", agentSignature);
+                    if (newSig !== null) {
+                      setAgentSignature(newSig);
+                      if (typeof window !== 'undefined') {
+                        localStorage.setItem('agent_signature', newSig);
+                      }
+                    }
+                  }}
+                  className="text-[10px] text-slate-500 hover:text-emerald-400 underline font-semibold transition-colors shrink-0 ml-2"
+                >
+                  Cambiar firma
+                </button>
+              </div>
+
               {/* Emoji, GIF & Sticker Picker Drawer */}
               <EmojiGifStickerPicker
                 isOpen={isEmojiPickerOpen}
@@ -1162,12 +1520,12 @@ export default function DashboardPage() {
                 accept="image/*,video/*,application/pdf"
                 onChange={handleFileChange}
               />
-              <div className="flex items-center gap-1.5 sm:gap-4">
+              <div className="flex items-center gap-1.5 sm:gap-3">
                 <Button 
                   size="icon" 
                   variant="ghost" 
                   onClick={() => setIsQuickRepliesOpen(true)}
-                  title="Respuestas Rápidas (Plantillas)"
+                  title="Respuestas Rápidas (Plantillas con Variables y Acciones CRM)"
                   className="rounded-xl text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 h-10 w-10 sm:h-12 sm:w-12 shrink-0"
                 >
                   <Zap className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -1180,6 +1538,15 @@ export default function DashboardPage() {
                   className="rounded-xl text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 h-10 w-10 sm:h-12 sm:w-12 shrink-0"
                 >
                   <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
+                </Button>
+                <Button 
+                  size="icon" 
+                  variant="ghost" 
+                  onClick={() => setIsScheduleModalOpen(true)}
+                  title="Agendar Mensaje para enviar en una fecha/hora específica"
+                  className="rounded-xl text-sky-400 hover:text-sky-300 hover:bg-sky-500/10 h-10 w-10 sm:h-12 sm:w-12 shrink-0"
+                >
+                  <Clock className="w-4 h-4 sm:w-5 sm:h-5" />
                 </Button>
                 <Button 
                   size="icon" 
@@ -1235,8 +1602,13 @@ export default function DashboardPage() {
                     className="w-full h-11 sm:h-14 bg-white/5 border border-white/5 rounded-2xl px-3 sm:px-6 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all font-medium"
                   />
                 </div>
+                {/* Voice Note Recorder (PTT) */}
+                <VoiceNoteRecorder 
+                  onSend={handleSendVoiceNote} 
+                  disabled={!selectedChat} 
+                />
                 <Button 
-                  onClick={handleSendMessage}
+                  onClick={() => handleSendMessage()}
                   disabled={sending || (!messageText.trim() && !attachment)}
                   className="w-11 h-11 sm:w-14 sm:h-14 bg-emerald-500 hover:bg-emerald-400 text-white rounded-2xl shadow-lg shadow-emerald-900/40 transition-all active:scale-95 shrink-0"
                 >
@@ -1405,17 +1777,38 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Quick Replies & AI Assistant Modals */}
+      {/* Quick Replies Modal with Dynamic Variables Context & Action Triggers */}
       <QuickRepliesModal
         isOpen={isQuickRepliesOpen}
         onClose={() => setIsQuickRepliesOpen(false)}
-        onSelect={(text, sendImmediately) => {
-          if (sendImmediately) {
-            setMessageText(text);
-            setTimeout(() => handleSendMessage(), 50);
-          } else {
-            setMessageText(prev => prev ? `${prev} ${text}` : text);
-          }
+        context={{
+          name: selectedChat?.name,
+          phone: selectedChat?.phone || selectedChat?.id,
+          stage: selectedChat?.stage,
+          loyalty: selectedChatLoyalty
+        }}
+        onSelect={handleSelectQuickReply}
+      />
+
+      {/* Schedule Message Modal */}
+      <ScheduleMessageModal
+        isOpen={isScheduleModalOpen}
+        onClose={() => setIsScheduleModalOpen(false)}
+        chatId={selectedChat?.id || ''}
+        phone={selectedChat?.phone || selectedChat?.id || ''}
+        contactName={selectedChat?.name}
+        context={{
+          name: selectedChat?.name,
+          phone: selectedChat?.phone || selectedChat?.id,
+          stage: selectedChat?.stage,
+          loyalty: selectedChatLoyalty
+        }}
+        onSchedule={(sched) => {
+          setScheduledMessages(prev => [...prev, sched]);
+          toast({
+            title: 'Mensaje Programado',
+            description: `Se enviará automáticamente el ${new Date(sched.scheduledTime).toLocaleString()}`
+          });
         }}
       />
 
