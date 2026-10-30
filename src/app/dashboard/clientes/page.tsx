@@ -5,6 +5,7 @@ import Link from 'next/link';
 import CrmPanel from '@/components/CrmPanel';
 import { Kanban, Search, ExternalLink, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import HelpContextButton from '@/components/help/HelpContextButton';
 
 export default function ClientsPage() {
   const [clients, setClients] = useState<any[]>([]);
@@ -44,13 +45,19 @@ export default function ClientsPage() {
             </p>
           </div>
 
-          <Link href="/dashboard/crm">
-            <Button className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-2 shadow-lg shadow-emerald-950/40">
-              <Kanban className="w-4 h-4" />
-              Ver Tablero Kanban CRM
-              <ExternalLink className="w-3.5 h-3.5 opacity-70" />
-            </Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            <HelpContextButton
+              slug="clientes/tags/clientes-etiquetas-uv"
+              tooltip="Ayuda de Clientes y Etiquetas Jerárquicas"
+            />
+            <Link href="/dashboard/crm">
+              <Button className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-2 shadow-lg shadow-emerald-950/40">
+                <Kanban className="w-4 h-4" />
+                Ver Tablero Kanban CRM
+                <ExternalLink className="w-3.5 h-3.5 opacity-70" />
+              </Button>
+            </Link>
+          </div>
         </div>
 
         {error && (

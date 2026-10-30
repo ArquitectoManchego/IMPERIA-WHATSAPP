@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import HelpContextButton from '@/components/help/HelpContextButton';
 
 export default function MetricsPage() {
   return (
@@ -33,9 +34,15 @@ export default function MetricsPage() {
           <p className="text-slate-400 text-sm font-medium">Análisis de rendimiento, servicios más demandados y actividad de clientes.</p>
         </div>
 
-        <Button variant="outline" className="h-12 border-white/5 bg-white/5 hover:bg-white/10 text-white rounded-2xl px-6 gap-2 font-bold tracking-wider uppercase text-[10px]">
-           Generar Reporte Full
-        </Button>
+        <div className="flex items-center gap-3">
+          <HelpContextButton
+            slug="estadisticas/metricas/modulo-estadisticas"
+            tooltip="Ayuda del Módulo de Estadísticas y Métricas"
+          />
+          <Button variant="outline" className="h-12 border-white/5 bg-white/5 hover:bg-white/10 text-white rounded-2xl px-6 gap-2 font-bold tracking-wider uppercase text-[10px]">
+             Generar Reporte Full
+          </Button>
+        </div>
       </header>
 
       {/* Main Stats Grid */}

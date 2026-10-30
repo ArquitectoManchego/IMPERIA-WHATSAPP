@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import HelpContextButton from '@/components/help/HelpContextButton';
 
 const mockInvoices = [
   { id: 'FAC-7821', client: 'Juan Pérez', date: '09 Abr 2026', amount: '$1,200', status: 'Paid' },
@@ -40,7 +41,11 @@ export default function FacturacionPage() {
           <p className="text-slate-400 text-sm font-medium">Control de ingresos, facturas emitidas y estados de pago.</p>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex items-center gap-3">
+          <HelpContextButton
+            slug="facturacion/comprobantes/modulo-facturacion"
+            tooltip="Ayuda del Módulo de Facturación"
+          />
           <Button variant="outline" className="h-12 border-white/5 bg-white/5 hover:bg-white/10 text-white rounded-2xl px-6 gap-2 font-bold tracking-wider uppercase text-[10px]">
              Exportar Reporte
           </Button>

@@ -40,6 +40,7 @@ const translations: Record<Locale, Record<string, string>> = {
     exportCsv: 'Exportar CSV',
     importCsv: 'Importar CSV',
     calendarSync: 'Agendar en Google Calendar',
+    help: 'Centro de Ayuda',
   },
   en: {
     messages: 'Messages',
@@ -76,6 +77,7 @@ const translations: Record<Locale, Record<string, string>> = {
     exportCsv: 'Export CSV',
     importCsv: 'Import CSV',
     calendarSync: 'Add to Google Calendar',
+    help: 'Help Center',
   },
   pt: {
     messages: 'Mensagens',
@@ -112,6 +114,7 @@ const translations: Record<Locale, Record<string, string>> = {
     exportCsv: 'Exportar CSV',
     importCsv: 'Importar CSV',
     calendarSync: 'Agendar no Google Calendar',
+    help: 'Centro de Ajuda',
   },
 };
 

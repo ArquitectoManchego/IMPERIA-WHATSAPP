@@ -27,6 +27,7 @@ import { useRouter } from 'next/navigation';
 import { useCrmUi } from '@/context/CrmUiContext';
 import { useToast } from '@/components/ui/use-toast';
 import { PipelineStage, OpportunityDeal, isContactInactive } from '@/lib/crm-domain';
+import HelpContextButton from '@/components/help/HelpContextButton';
 
 export default function CrmKanbanPage() {
   const router = useRouter();
@@ -352,6 +353,11 @@ export default function CrmKanbanPage() {
             <Plus className="w-3.5 h-3.5" />
             <span>Nuevo contacto</span>
           </button>
+
+          <HelpContextButton
+            slug="crm/kanban/pipeline-kanban"
+            tooltip="Ayuda de Pipeline CRM y Tablero Kanban"
+          />
         </div>
       </header>
 

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { AutomationRule } from '@/lib/crm-domain';
+import HelpContextButton from '@/components/help/HelpContextButton';
 
 export default function AutomationsPage() {
   const { toast } = useToast();
@@ -146,13 +147,19 @@ export default function AutomationsPage() {
           </div>
         </div>
 
-        <button
-          onClick={() => setIsCreating(!isCreating)}
-          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-2 transition-all shadow-md shadow-emerald-950"
-        >
-          <Plus className="w-4 h-4" />
-          <span>{isCreating ? 'Ver Reglas' : 'Nueva Automatización'}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <HelpContextButton
+            slug="automatizaciones/reglas/chatbot-reglas"
+            tooltip="Ayuda de Automatizaciones y Chatbot"
+          />
+          <button
+            onClick={() => setIsCreating(!isCreating)}
+            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-2 transition-all shadow-md shadow-emerald-950"
+          >
+            <Plus className="w-4 h-4" />
+            <span>{isCreating ? 'Ver Reglas' : 'Nueva Automatización'}</span>
+          </button>
+        </div>
       </header>
 
       {/* Main Body */}

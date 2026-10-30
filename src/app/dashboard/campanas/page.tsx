@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { CampaignItem } from '@/lib/crm-domain';
+import HelpContextButton from '@/components/help/HelpContextButton';
 
 export default function CampaignsPage() {
   const { toast } = useToast();
@@ -192,13 +193,19 @@ export default function CampaignsPage() {
           </div>
         </div>
 
-        <button
-          onClick={() => setIsCreating(!isCreating)}
-          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-2 transition-all shadow-md shadow-emerald-950"
-        >
-          <Plus className="w-4 h-4" />
-          <span>{isCreating ? 'Ver Campañas' : 'Nueva Campaña'}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <HelpContextButton
+            slug="campanas/antiban/campanas-ia-antiban"
+            tooltip="Ayuda de Campañas Masivas e IA Anti-Baneo"
+          />
+          <button
+            onClick={() => setIsCreating(!isCreating)}
+            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-2 transition-all shadow-md shadow-emerald-950"
+          >
+            <Plus className="w-4 h-4" />
+            <span>{isCreating ? 'Ver Campañas' : 'Nueva Campaña'}</span>
+          </button>
+        </div>
       </header>
 
       {/* Main Body */}

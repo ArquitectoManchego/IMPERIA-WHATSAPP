@@ -48,6 +48,7 @@ import EmojiGifStickerPicker from '@/components/whatsapp/EmojiGifStickerPicker';
 import ContactPhotoModal from '@/components/whatsapp/ContactPhotoModal';
 import VoiceNoteRecorder from '@/components/whatsapp/VoiceNoteRecorder';
 import ScheduleMessageModal, { ScheduledMessage } from '@/components/whatsapp/ScheduleMessageModal';
+import HelpContextButton from '@/components/help/HelpContextButton';
 
 export default function DashboardPage() {
   const { toast } = useToast();
@@ -1297,6 +1298,10 @@ export default function DashboardPage() {
                   <Button size="icon" variant="ghost" className="rounded-xl hover:bg-white/5 text-slate-400">
                     <Search className="w-5 h-5" />
                   </Button>
+                  <HelpContextButton 
+                    slug="mensajes/bandeja/pestanas-rapidas" 
+                    tooltip="Ayuda de Mensajería y Funciones de Chat" 
+                  />
               </div>
             </header>
 

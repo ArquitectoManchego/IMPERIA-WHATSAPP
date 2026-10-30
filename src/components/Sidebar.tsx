@@ -12,7 +12,8 @@ import {
   EyeOff, 
   Globe, 
   UserPlus,
-  LogOut 
+  LogOut,
+  HelpCircle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
@@ -30,6 +31,7 @@ export default function Sidebar() {
     { icon: Megaphone, label: t('campaigns'), href: '/dashboard/campanas' },
     { icon: Bot, label: t('automations'), href: '/dashboard/automatizaciones' },
     { icon: Package, label: t('orders'), href: '/dashboard/pedidos' },
+    { icon: HelpCircle, label: t('help'), href: '/dashboard/ayuda' },
   ];
 
   const cycleLocale = () => {
